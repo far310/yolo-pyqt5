@@ -1,0 +1,15 @@
+# Python依赖包 - 最新版本
+PyQt5>=5.15.11
+opencv-python>=4.10.0
+numpy>=2.2.1
+psutil>=6.1.0
+pandas>=2.2.3
+tflite-runtime>=2.18.0
+# 或者使用完整的 TensorFlow (二选一)
+# tensorflow>=2.18.0
+Pillow>=11.0.0
+# 可选：GPU加速支持
+# tensorflow-gpu>=2.18.0
+# 可选：其他有用的包
+scikit-learn>=1.6.0
+matplotlib>=3.10.0
