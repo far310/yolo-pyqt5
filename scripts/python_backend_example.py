@@ -691,7 +691,6 @@ class ImageRecognitionAPI(QObject):
                 if (current_time - self.last_detection_time) >= self.detection_delay:
                     self.detected_objects = self.yolo_detector.detect_objects(frame)
                     self.last_detection_time = current_time
-                
                 # 应用图像处理并绘制检测结果
                 processed_frame = self._apply_image_processing(frame)
                 self.processed_frame = self._draw_detections(processed_frame.copy())

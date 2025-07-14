@@ -48,7 +48,7 @@ export const VideoDisplay = forwardRef<
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="relative bg-black rounded-lg overflow-hidden w-full h-96">
+        <div className="relative bg-black rounded-lg overflow-hidden w-full h-[520px]">
           {/* 显示从后端推送的图像 */}
           {isStreaming && currentFrame ? (
             <img
