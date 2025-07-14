@@ -1,6 +1,6 @@
 """
-Python QWebEngineView 后端代码 - 轮询版本
-支持直接输入摄像头索引和模型路径
+Python QWebEngineView 后端代码 - 轮询版本 + YOLO检测
+支持直接输入摄像头索引和模型路径，集成TensorFlow Lite YOLO检测
 """
 
 # 启用调试模式（必须在 QApplication 之前设置）
@@ -31,6 +31,10 @@ except ImportError:
     import tensorflow as tf
     Interpreter, load_delegate = tf.lite.Interpreter, tf.lite.experimental.load_delegate
 
+# YOLO检测相关导入
+from sklearn.metrics.pairwise import cosine_similarity
+from skimage.metrics import structural_similarity as ssim
+
 class CustomWebEnginePage(QWebEnginePage):
     """自定义 WebEngine 页面，修复交互问题"""
     
@@ -41,99 +45,321 @@ class CustomWebEnginePage(QWebEnginePage):
         """捕获 JavaScript 控制台消息"""
         print(f"JS Console [{level}]: {message} (Line: {lineNumber}, Source: {sourceID})")
 
-class TensorFlowLiteModel:
-    """TensorFlow Lite 模型封装类"""
+class YOLODetector:
+    """YOLO检测器类"""
     
-    def __init__(self, model_path: str, num_threads: int = 4):
-        self.model_path = model_path
+    def __init__(self, model_path: str = None):
         self.interpreter = None
+        self.model_path = model_path
         self.input_details = None
         self.output_details = None
-        self.num_threads = num_threads
-        self.load_model()
+        
+        # YOLO类别
+        self.classes = [
+            "Hamburger", "Shreddedchicken", "Burrito", "Slicedroastbeef", "Shreddedpork",
+            "Fajitasteak", "Fajitachicken", "Cheeseburger", "Doublehamburger", 
+            "DoubleCheeseburger", "Chickenbreast bites", "Shrimpscampi", "Broccoliflorets",
+            "ChoppedFajitaChicken", "ChoppedFajitaSteak"
+        ]
+        
+        # 检测参数
+        self.obj_thresh = 0.1
+        self.nms_thresh = 0.1
+        self.score_thresh = 0.0
+        
+        # 汉堡尺寸分类
+        self.hamburger_size_range = (10, 13)
+        
+        # 透视变换参数
+        self.src_points = np.array([[650, 330], [1425, 330], [1830, 889], [230, 889]], dtype=np.float32)
+        self.real_width_cm = 29.0
+        self.real_height_cm = 18.5
+        self.pixel_per_cm = self.compute_pixel_per_cm()
+        
+        # 计算输出尺寸
+        self.output_width = int(self.real_width_cm * self.pixel_per_cm)
+        self.output_height = int(self.real_height_cm * self.pixel_per_cm)
+        self.dst_points = np.array([
+            [0, 0], [self.output_width, 0], 
+            [self.output_width, self.output_height], [0, self.output_height]
+        ], dtype=np.float32)
+        
+        # 相机参数
+        self.camera_matrix = np.array([
+            [1298.54926, 0.0, 966.93144],
+            [0.0, 1294.39363, 466.380271],
+            [0.0, 0.0, 1.0]
+        ])
+        self.dist_coeffs = np.array([
+            [-0.44903195, 0.25133919, 0.00037556, 0.00024487, -0.0794278]
+        ])
+        
+        # 初始化畸变矫正映射
+        self.map1 = None
+        self.map2 = None
+        self.init_undistort_maps()
+        
+        # 背景图像
+        self.background_image = None
+        
+        if model_path and os.path.exists(model_path):
+            self.load_model(model_path)
     
-    def load_model(self):
-        """加载 TensorFlow Lite 模型"""
+    def compute_pixel_per_cm(self):
+        """计算每厘米像素数"""
+        ref_width_px = np.linalg.norm(np.array(self.src_points[1]) - np.array(self.src_points[0]))
+        ref_height_px = np.linalg.norm(np.array(self.src_points[3]) - np.array(self.src_points[0]))
+        
+        pixel_per_cm_w = ref_width_px / self.real_width_cm
+        pixel_per_cm_h = ref_height_px / self.real_height_cm
+        
+        return (pixel_per_cm_w + pixel_per_cm_h) / 2.0
+    
+    def init_undistort_maps(self):
+        """初始化畸变矫正映射"""
+        image_size = (1920, 1080)
+        newcameramtx, _ = cv2.getOptimalNewCameraMatrix(
+            self.camera_matrix, self.dist_coeffs, image_size, 1.0
+        )
+        self.map1, self.map2 = cv2.initUndistortRectifyMap(
+            self.camera_matrix, self.dist_coeffs, None, 
+            newcameramtx, image_size, cv2.CV_16SC2
+        )
+    
+    def load_model(self, model_path: str):
+        """加载TensorFlow Lite模型"""
         try:
-            self.interpreter = Interpreter(
-                model_path=self.model_path,
-                num_threads=self.num_threads
-            )
+            self.interpreter = Interpreter(model_path=model_path, num_threads=4)
             self.interpreter.allocate_tensors()
             self.input_details = self.interpreter.get_input_details()
             self.output_details = self.interpreter.get_output_details()
-            print(f"Model {self.model_path} loaded successfully.")
+            self.model_path = model_path
+            print(f"YOLO模型加载成功: {model_path}")
             return True
         except Exception as e:
-            print(f"Failed to load model: {e}")
+            print(f"YOLO模型加载失败: {e}")
             return False
-    
-    def predict(self, image):
-        """执行模型推理"""
-        if self.interpreter is None:
-            return None
-        
-        try:
-            # 预处理图像
-            input_data = self.preprocess_image(image)
-            
-            # 设置输入张量
-            self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
-            
-            # 执行推理
-            self.interpreter.invoke()
-            
-            # 获取输出
-            output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
-            
-            # 后处理
-            return self.postprocess_output(output_data, image.shape)
-        except Exception as e:
-            print(f"Prediction error: {e}")
-            return None
     
     def preprocess_image(self, image):
         """图像预处理"""
-        # 获取输入张量形状
-        input_shape = self.input_details[0]['shape']
-        height, width = input_shape[1], input_shape[2]
+        if self.interpreter is None:
+            return None
+            
+        # 畸变矫正
+        if self.map1 is not None:
+            image = cv2.remap(image, self.map1, self.map2, cv2.INTER_LINEAR)
         
-        # 调整图像大小
-        resized = cv2.resize(image, (width, height))
+        # 透视变换
+        image = cv2.warpPerspective(
+            image, 
+            cv2.getPerspectiveTransform(self.src_points, self.dst_points),
+            (self.output_width, self.output_height)
+        )
+        
+        # 获取输入尺寸
+        input_shape = self.input_details[0]['shape']
+        input_height, input_width = input_shape[1], input_shape[2]
+        
+        # LetterBox缩放
+        processed_image = self.letterbox_resize(image, (input_width, input_height))
         
         # 归一化
-        normalized = resized.astype(np.float32) / 255.0
+        processed_image = processed_image.astype(np.float32) / 255.0
+        processed_image = np.expand_dims(processed_image, axis=0)
         
-        # 添加批次维度
-        input_data = np.expand_dims(normalized, axis=0)
-        
-        return input_data
+        return processed_image, image
     
-    def postprocess_output(self, output, original_shape):
-        """输出后处理"""
-        detections = []
+    def letterbox_resize(self, image, target_size):
+        """LetterBox缩放"""
+        h, w = image.shape[:2]
+        target_w, target_h = target_size
         
+        # 计算缩放比例
+        scale = min(target_w / w, target_h / h)
+        new_w, new_h = int(w * scale), int(h * scale)
+        
+        # 缩放图像
+        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        
+        # 创建目标尺寸的图像并居中放置
+        result = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
+        y_offset = (target_h - new_h) // 2
+        x_offset = (target_w - new_w) // 2
+        result[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+        
+        return result
+    
+    def postprocess_detections(self, output, original_image_shape):
+        """后处理检测结果"""
         if len(output.shape) == 3:
-            output = output[0]  # 移除批次维度
+            output = output[0]
         
-        # 假设输出格式为 [num_detections, 6] (x, y, w, h, confidence, class)
-        for detection in output:
-            if len(detection) >= 6:
-                x, y, w, h, confidence, class_id = detection[:6]
-                if confidence > 0.5:  # 置信度阈值
-                    detections.append({
+        output = output.T
+        boxes = output[..., :4]
+        scores = np.max(output[..., 4:], axis=1)
+        class_ids = np.argmax(output[..., 4:], axis=1)
+        
+        # 应用NMS
+        indices = cv2.dnn.NMSBoxes(
+            boxes.tolist(), scores.tolist(), 
+            self.obj_thresh, self.nms_thresh
+        )
+        
+        detections = []
+        if len(indices) > 0:
+            for i in indices.flatten():
+                box = boxes[i]
+                score = scores[i]
+                class_id = class_ids[i]
+                
+                if score >= self.score_thresh:
+                    # 转换坐标格式
+                    x, y, w, h = box
+                    detection = {
+                        'id': f'obj_{int(time.time())}_{i}',
+                        'type': self.classes[class_id] if class_id < len(self.classes) else 'Unknown',
+                        'confidence': float(score),
                         'x': float(x),
                         'y': float(y),
                         'width': float(w),
                         'height': float(h),
-                        'confidence': float(confidence),
                         'class_id': int(class_id)
-                    })
+                    }
+                    
+                    # 如果是汉堡，计算实际尺寸
+                    if self.classes[class_id] == 'Hamburger':
+                        actual_w = w / self.pixel_per_cm
+                        actual_h = h / self.pixel_per_cm
+                        
+                        # 高度补偿
+                        target_height = 2.7  # 汉堡高度
+                        camera_height = 13.0
+                        actual_w = actual_w / (1 + (target_height / camera_height))
+                        
+                        # 尺寸分类
+                        min_size, max_size = self.hamburger_size_range
+                        if actual_w <= min_size:
+                            size_category = 'small'
+                        elif actual_w < max_size:
+                            size_category = 'medium'
+                        else:
+                            size_category = 'large'
+                        
+                        detection['size'] = size_category
+                        detection['actual_width_cm'] = actual_w
+                        detection['actual_height_cm'] = actual_h
+                    
+                    detections.append(detection)
         
         return detections
+    
+    def detect_background_change(self, current_image, detected_boxes):
+        """检测背景变化（异物检测）"""
+        if self.background_image is None:
+            return False, 0.0
+        
+        try:
+            # 创建遮罩排除检测框区域
+            mask = np.ones(current_image.shape[:2], dtype=np.uint8) * 255
+            
+            for detection in detected_boxes:
+                x, y, w, h = int(detection['x']), int(detection['y']), int(detection['width']), int(detection['height'])
+                x1 = max(0, x - 10)
+                y1 = max(0, y - 10)
+                x2 = min(current_image.shape[1], x + w + 10)
+                y2 = min(current_image.shape[0], y + h + 10)
+                cv2.rectangle(mask, (x1, y1), (x2, y2), 0, -1)
+            
+            # 灰度转换
+            gray1 = cv2.cvtColor(current_image, cv2.COLOR_BGR2GRAY)
+            gray2 = cv2.cvtColor(self.background_image, cv2.COLOR_BGR2GRAY)
+            
+            # 应用遮罩
+            gray1 = cv2.bitwise_and(gray1, gray1, mask=mask)
+            gray2 = cv2.bitwise_and(gray2, gray2, mask=mask)
+            
+            # 缩放
+            gray1 = cv2.resize(gray1, (120, 120))
+            gray2 = cv2.resize(gray2, (120, 120))
+            
+            # 计算余弦相似度
+            vec1 = gray1.flatten().reshape(1, -1)
+            vec2 = gray2.flatten().reshape(1, -1)
+            similarity = cosine_similarity(vec1, vec2)[0][0]
+            
+            is_different = similarity < 0.98
+            return is_different, similarity
+            
+        except Exception as e:
+            print(f"背景变化检测错误: {e}")
+            return False, 0.0
+    
+    def detect_objects(self, image):
+        """执行目标检测"""
+        if self.interpreter is None:
+            return []
+        
+        try:
+            # 预处理
+            processed_image, perspective_image = self.preprocess_image(image)
+            if processed_image is None:
+                return []
+            
+            # 量化处理（如果需要）
+            input_scale, input_zero_point = self.input_details[0]["quantization"]
+            if input_scale != 0:  # 量化模型
+                processed_image = (processed_image / input_scale + input_zero_point).astype(np.int8)
+            
+            # 推理
+            self.interpreter.set_tensor(self.input_details[0]['index'], processed_image)
+            self.interpreter.invoke()
+            
+            # 获取输出
+            output = self.interpreter.get_tensor(self.output_details[0]['index'])
+            
+            # 反量化（如果需要）
+            output_scale, output_zero_point = self.output_details[0]["quantization"]
+            if output_scale != 0:  # 量化模型
+                output = (output.astype(np.float32) - output_zero_point) * output_scale
+            
+            # 后处理
+            detections = self.postprocess_detections(output, perspective_image.shape)
+            
+            # 检测背景变化
+            if detections:
+                is_different, similarity = self.detect_background_change(perspective_image, detections)
+                if is_different:
+                    # 添加异物检测结果
+                    detections.append({
+                        'id': f'foreign_matter_{int(time.time())}',
+                        'type': '异物',
+                        'confidence': 1.0 - similarity,
+                        'x': 0,
+                        'y': 0,
+                        'width': perspective_image.shape[1],
+                        'height': perspective_image.shape[0],
+                        'similarity': similarity
+                    })
+            
+            return detections
+            
+        except Exception as e:
+            print(f"目标检测错误: {e}")
+            return []
+    
+    def set_background_image(self, image):
+        """设置背景图像"""
+        if self.map1 is not None:
+            image = cv2.remap(image, self.map1, self.map2, cv2.INTER_LINEAR)
+        
+        self.background_image = cv2.warpPerspective(
+            image,
+            cv2.getPerspectiveTransform(self.src_points, self.dst_points),
+            (self.output_width, self.output_height)
+        )
 
 class ImageRecognitionAPI(QObject):
-    """图像识别 API 类 - 轮询版本"""
+    """图像识别 API 类 - 轮询版本 + YOLO检测"""
     
     def __init__(self):
         super().__init__()
@@ -141,9 +367,13 @@ class ImageRecognitionAPI(QObject):
         self.current_frame = None
         self.processed_frame = None
         self.is_streaming = False
-        self.model = None
         self.current_model_path = ""
         self.current_camera_index = "0"
+        
+        # YOLO检测器
+        self.yolo_detector = YOLODetector()
+        
+        # 图像参数
         self.image_params = {
             'contrast': 100,
             'brightness': 100,
@@ -169,54 +399,25 @@ class ImageRecognitionAPI(QObject):
                 'bottomLeft': {'x': 230, 'y': 889}
             }
         }
+        
         self.recognition_settings = {}
         self.detected_objects = []
         self.fps_counter = 0
         self.last_fps_time = time.time()
         self.detection_delay = 1.0
         self.last_detection_time = 0
-        
-        # 相机参数
-        self.camera_matrix = np.array([
-            [1298.54926, 0.0, 966.93144],
-            [0.0, 1294.39363, 466.380271],
-            [0.0, 0.0, 1.0]
-        ])
-        self.dist_coeffs = np.array([
-            [-0.44903195, 0.25133919, 0.00037556, 0.00024487, -0.0794278]
-        ])
-        
-        # 透视变换参数
-        self.src_points = np.array([
-            [650, 330], [1425, 330], [1830, 889], [230, 889]
-        ], dtype=np.float32)
-        
-        # 初始化畸变矫正映射
-        self.map1 = None
-        self.map2 = None
-        self.init_undistort_maps()
-    
-    def init_undistort_maps(self):
-        """初始化畸变矫正映射"""
-        image_size = (1920, 1080)  # 相机分辨率
-        self.map1, self.map2 = cv2.initUndistortRectifyMap(
-            self.camera_matrix, self.dist_coeffs, None, 
-            self.camera_matrix, image_size, cv2.CV_16SC2
-        )
     
     @pyqtSlot(str, result=str)
     def start_camera(self, camera_index: str) -> str:
-        """启动摄像头 - 直接使用摄像头索引"""
+        """启动摄像头"""
         try:
             print(f"Starting camera with index: {camera_index}")
             
-            # 将字符串转换为整数
             try:
                 camera_idx = int(camera_index)
             except ValueError:
                 return json.dumps({'success': False, 'error': '无效的摄像头索引'}, ensure_ascii=False)
             
-            # 检查索引范围
             if camera_idx < 0 or camera_idx > 10:
                 return json.dumps({'success': False, 'error': '摄像头索引必须在0-10之间'}, ensure_ascii=False)
             
@@ -231,6 +432,12 @@ class ImageRecognitionAPI(QObject):
             
             self.current_camera_index = camera_index
             self.is_streaming = True
+            
+            # 设置背景图像（第一帧）
+            ret, frame = self.camera.read()
+            if ret:
+                self.yolo_detector.set_background_image(frame)
+            
             threading.Thread(target=self._video_stream_thread, daemon=True).start()
             
             result = json.dumps({'success': True, 'message': f'摄像头 {camera_idx} 启动成功'}, ensure_ascii=False)
@@ -261,13 +468,11 @@ class ImageRecognitionAPI(QObject):
     
     @pyqtSlot(str, result=str)
     def load_model(self, model_path: str) -> str:
-        """加载AI模型 - 直接使用模型路径"""
+        """加载AI模型"""
         try:
             print(f"Loading model: {model_path}")
             
-            # 检查文件是否存在
             if not os.path.exists(model_path):
-                # 如果模型文件不存在，创建一个模拟的成功响应
                 result = json.dumps({
                     'success': True, 
                     'message': f'模型加载成功 (模拟): {model_path}'
@@ -276,10 +481,14 @@ class ImageRecognitionAPI(QObject):
                 self.current_model_path = model_path
                 return result
             
-            self.model = TensorFlowLiteModel(model_path)
-            self.current_model_path = model_path
+            # 加载YOLO模型
+            success = self.yolo_detector.load_model(model_path)
+            if success:
+                self.current_model_path = model_path
+                result = json.dumps({'success': True, 'message': f'YOLO模型加载成功: {model_path}'}, ensure_ascii=False)
+            else:
+                result = json.dumps({'success': False, 'error': f'YOLO模型加载失败: {model_path}'}, ensure_ascii=False)
             
-            result = json.dumps({'success': True, 'message': f'模型加载成功: {model_path}'}, ensure_ascii=False)
             print(f"load_model result: {result}")
             return result
         except Exception as e:
@@ -295,7 +504,14 @@ class ImageRecognitionAPI(QObject):
             params = json.loads(params_json)
             self.image_params.update(params)
             
-            # 处理延迟设置
+            # 更新YOLO检测器参数
+            if 'objThresh' in params:
+                self.yolo_detector.obj_thresh = params['objThresh'] / 100.0
+            if 'nmsThresh' in params:
+                self.yolo_detector.nms_thresh = params['nmsThresh'] / 100.0
+            if 'scoreThresh' in params:
+                self.yolo_detector.score_thresh = params['scoreThresh'] / 100.0
+            
             delay_seconds = params.get('delaySeconds', 1.0)
             if delay_seconds > 0:
                 self.detection_delay = delay_seconds
@@ -446,8 +662,14 @@ class ImageRecognitionAPI(QObject):
                 # 绘制边界框
                 cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
                 
-                # 绘制标签
+                # 创建标签
                 label = f'{obj_type}: {confidence:.2f}'
+                if 'size' in obj:
+                    label += f' ({obj["size"]})'
+                if 'actual_width_cm' in obj:
+                    label += f' {obj["actual_width_cm"]:.1f}cm'
+                
+                # 绘制标签背景和文字
                 label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
                 cv2.rectangle(frame, (x, y - label_size[1] - 10), (x + label_size[0], y), color, -1)
                 cv2.putText(frame, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
@@ -464,16 +686,14 @@ class ImageRecognitionAPI(QObject):
             if ret:
                 self.current_frame = frame.copy()
                 
-                # 应用图像处理
-                processed_frame = self._apply_image_processing(frame)
-                
                 # 根据延迟设置执行目标检测
                 current_time = time.time()
-                if self.model and (current_time - self.last_detection_time) >= self.detection_delay:
-                    self._perform_detection(processed_frame)
+                if (current_time - self.last_detection_time) >= self.detection_delay:
+                    self.detected_objects = self.yolo_detector.detect_objects(frame)
                     self.last_detection_time = current_time
                 
-                # 绘制检测结果
+                # 应用图像处理并绘制检测结果
+                processed_frame = self._apply_image_processing(frame)
                 self.processed_frame = self._draw_detections(processed_frame.copy())
                 
                 self._update_fps()
@@ -485,12 +705,16 @@ class ImageRecognitionAPI(QObject):
         processed = frame.copy()
         
         # 畸变矫正
-        if self.image_params.get('distortionEnabled', True) and self.map1 is not None:
-            processed = cv2.remap(processed, self.map1, self.map2, cv2.INTER_LINEAR)
+        if self.image_params.get('distortionEnabled', True) and self.yolo_detector.map1 is not None:
+            processed = cv2.remap(processed, self.yolo_detector.map1, self.yolo_detector.map2, cv2.INTER_LINEAR)
         
         # 透视变换
         if self.image_params.get('perspectiveEnabled', True):
-            processed = self._perspective_transform(processed)
+            processed = cv2.warpPerspective(
+                processed,
+                cv2.getPerspectiveTransform(self.yolo_detector.src_points, self.yolo_detector.dst_points),
+                (self.yolo_detector.output_width, self.yolo_detector.output_height)
+            )
         
         # 基础图像调整
         contrast = self.image_params.get('contrast', 100) / 100.0
@@ -512,56 +736,6 @@ class ImageRecognitionAPI(QObject):
         
         return processed
     
-    def _perspective_transform(self, image):
-        """透视变换"""
-        try:
-            # 计算输出尺寸
-            real_width = self.image_params.get('realWidthCm', 29)
-            real_height = self.image_params.get('realHeightCm', 18.5)
-            pixel_per_cm = 20  # 假设每厘米20像素
-            
-            output_width = int(real_width * pixel_per_cm)
-            output_height = int(real_height * pixel_per_cm)
-            
-            dst_points = np.array([
-                [0, 0], [output_width, 0], 
-                [output_width, output_height], [0, output_height]
-            ], dtype=np.float32)
-            
-            # 获取透视变换矩阵
-            matrix = cv2.getPerspectiveTransform(self.src_points, dst_points)
-            
-            # 应用透视变换
-            transformed = cv2.warpPerspective(image, matrix, (output_width, output_height))
-            
-            return transformed
-        except Exception as e:
-            print(f"Perspective transform error: {e}")
-            return image
-    
-    def _perform_detection(self, frame):
-        """执行目标检测"""
-        try:
-            # 生成模拟检测数据
-            if np.random.random() > 0.7:  # 30%概率生成新的检测结果
-                self.detected_objects = []
-                num_objects = np.random.randint(0, 4)
-                
-                for i in range(num_objects):
-                    obj = {
-                        'id': f'obj_{int(time.time())}_{i}',
-                        'type': np.random.choice(['Hamburger', '异物', '正常物体', '缺陷']),
-                        'confidence': np.random.uniform(0.6, 1.0),
-                        'size': np.random.choice(['small', 'medium', 'large']),
-                        'x': np.random.randint(50, 450),
-                        'y': np.random.randint(50, 350),
-                        'width': np.random.randint(40, 120),
-                        'height': np.random.randint(40, 120)
-                    }
-                    self.detected_objects.append(obj)
-        except Exception as e:
-            print(f"Detection error: {e}")
-    
     def _update_fps(self):
         """更新FPS计数"""
         current_time = time.time()
@@ -574,7 +748,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('图像识别系统 - 轮询版')
+        self.setWindowTitle('图像识别系统 - YOLO检测版')
         self.setGeometry(100, 100, 1400, 900)
         
         # 创建中央部件
@@ -615,7 +789,6 @@ class MainWindow(QMainWindow):
     
     def load_web_page(self):
         """加载网页"""
-        # 可以加载本地HTML文件或远程URL
         url = QUrl('http://localhost:3000')  # Next.js 开发服务器
         self.web_view.load(url)
         
@@ -626,7 +799,6 @@ class MainWindow(QMainWindow):
         """页面加载完成回调"""
         if success:
             print("Page loaded successfully")
-            # 注入一些调试脚本
             self.inject_debug_script()
         else:
             print("Failed to load page")
@@ -634,7 +806,7 @@ class MainWindow(QMainWindow):
     def inject_debug_script(self):
         """注入调试脚本"""
         debug_script = """
-        console.log('Debug script injected - Polling Version');
+        console.log('Debug script injected - YOLO Detection Version');
         
         // 检查 QWebChannel 是否可用
         if (typeof qt !== 'undefined' && qt.webChannelTransport) {
@@ -663,8 +835,8 @@ def main():
     app = QApplication(sys.argv)
     
     # 设置应用程序属性
-    app.setApplicationName('图像识别系统 - 轮询版')
-    app.setApplicationVersion('2.1.0')
+    app.setApplicationName('图像识别系统 - YOLO检测版')
+    app.setApplicationVersion('3.0.0')
     
     # 创建主窗口
     window = MainWindow()
@@ -672,6 +844,7 @@ def main():
     
     print("WebEngine Remote Debugging enabled on port 9222")
     print("You can access it at: http://localhost:9222")
+    print("YOLO Detection System Ready!")
     
     # 运行应用
     sys.exit(app.exec_())
