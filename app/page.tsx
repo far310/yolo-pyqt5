@@ -54,6 +54,7 @@ export default function ImageRecognitionDashboard() {
     cameraParams: true,
     sizeClassification: true,
     realSize: true,
+    backgroundImage: true, // 添加背景图像折叠状态
   })
 
   // 图像参数
@@ -86,6 +87,7 @@ export default function ImageRecognitionDashboard() {
     hamburgerSizeMax: 13,
     realWidthCm: 29,
     realHeightCm: 18.5,
+    backgroundImagePath: "", // 背景图像路径
   })
 
   // 识别设置
@@ -230,6 +232,7 @@ export default function ImageRecognitionDashboard() {
       hamburgerSizeMax: 13,
       realWidthCm: 29,
       realHeightCm: 18.5,
+      backgroundImagePath: "", // 重置背景图像路径
     }
     handleImageParamsChange(defaultParams)
   }
@@ -266,7 +269,7 @@ export default function ImageRecognitionDashboard() {
         // 从消息中提取文件路径
         const pathMatch = result.message.match(/报告已导出: (.+)/)
         const filePath = pathMatch ? pathMatch[1] : "未知路径"
-        showSuccess(`检测报告导出��功！\n路径: ${filePath}`, 5000)
+        showSuccess(`检测报告导出功！\n路径: ${filePath}`, 5000)
       } else {
         showError(result.error || "导出报告失败")
       }

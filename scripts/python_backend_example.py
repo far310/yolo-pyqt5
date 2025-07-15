@@ -1,6 +1,6 @@
 """
-Python QWebEngineView 后端代码 - 轮询版本 + YOLO检测
-支持直接输入摄像头索引和模型路径，集成TensorFlow Lite YOLO检测
+Python QWebEngineView 后端代码 - 优化版本 + YOLO检测
+使用线程池和队列优化性能，支持背景图像文件读取
 """
 
 # 启用调试模式（必须在 QApplication 之前设置）
@@ -15,8 +15,9 @@ import cv2
 import numpy as np
 from typing import Dict, List, Any, Optional
 import psutil
-from queue import Queue
-from concurrent.futures import ThreadPoolExecutor
+from queue import Queue, Empty
+from concurrent.futures import ThreadPoolExecutor, Future
+from pathlib import Path
 
 # PyQt5 imports
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
@@ -44,6 +45,22 @@ class CustomWebEnginePage(QWebEnginePage):
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
         """捕获 JavaScript 控制台消息"""
         print(f"JS Console [{level}]: {message} (Line: {lineNumber}, Source: {sourceID})")
+
+class FrameData:
+    """帧数据结构"""
+    def __init__(self, frame: np.ndarray, timestamp: float, frame_id: int):
+        self.frame = frame
+        self.timestamp = timestamp
+        self.frame_id = frame_id
+
+class DetectionResult:
+    """检测结果结构"""
+    def __init__(self, detections: List[Dict], processed_frame: np.ndarray, 
+                 frame_id: int, timestamp: float):
+        self.detections = detections
+        self.processed_frame = processed_frame
+        self.frame_id = frame_id
+        self.timestamp = timestamp
 
 class LetterBox:
     """LetterBox预处理类，与附件中的实现完全一致"""
@@ -115,8 +132,7 @@ class LetterBox:
 class YOLODetector:
     """YOLO检测器类，使用与附件完全一致的预处理和后处理"""
     
-    def __init__(self, model_path: str = None):
-        super().__init__()
+    def __init__(self, model_path: str = None, background_image_path: str = None):
         self.interpreter = None
         self.model_path = model_path
         self.input_details = None
@@ -180,14 +196,41 @@ class YOLODetector:
         self.map2 = None
         self.init_undistort_maps()
         
-        # 背景图像
+        # 背景图像 - 从文件读取
         self.background_image = None
+        self.background_image_path = background_image_path
+        self.load_background_image()
         
         # 颜色调色板
         self.color_palette = np.random.uniform(0, 255, size=(len(self.classes), 3))
         
         if model_path and os.path.exists(model_path):
             self.load_model(model_path)
+    
+    def load_background_image(self):
+        """从文件加载背景图像"""
+        if self.background_image_path and os.path.exists(self.background_image_path):
+            try:
+                background = cv2.imread(self.background_image_path)
+                if background is not None:
+                    # 应用相同的预处理
+                    background = self.undistort_image_fast(background)
+                    self.background_image = self.perspective_transform(
+                        background, self.src_points, self.dst_points, 
+                        self.output_width, self.output_height
+                    )
+                    print(f"背景图像加载成功: {self.background_image_path}")
+                else:
+                    print(f"无法读取背景图像: {self.background_image_path}")
+            except Exception as e:
+                print(f"加载背景图像失败: {e}")
+        else:
+            print("背景图像路径未设置或文件不存在")
+    
+    def set_background_image_path(self, path: str):
+        """设置背景图像路径并重新加载"""
+        self.background_image_path = path
+        self.load_background_image()
     
     def compute_pixel_per_cm(self):
         """计算每厘米像素数 - 与附件一致"""
@@ -483,19 +526,11 @@ class YOLODetector:
     def detect_objects(self, image):
         """主检测函数 - 与附件myFunc函数逻辑完全一致"""
         if self.interpreter is None:
-            return []
+            return [], image
         
         try:
             # 获取图片原始尺寸
             original_size = image.shape[:2]
-        
-            # 使用缓存的参数，无需重复获取
-            # input_details = self.interpreter.get_input_details()  # 移除
-            # output_details = self.interpreter.get_output_details()  # 移除
-            # input_scale, input_zero_point = input_details[0]["quantization"]  # 移除
-            # output_scale, output_zero_point = output_details[0]["quantization"]  # 移除
-            # input_shape = input_details[0]["shape"]  # 移除
-            # size = (input_shape[1], input_shape[2])  # 移除
         
             # 畸变矫正
             image = self.undistort_image_fast(image)
@@ -588,26 +623,27 @@ class YOLODetector:
         except Exception as e:
             print(f"目标检测错误: {e}")
             return [], image
-    
-    def set_background_image(self, image):
-        """设置背景图像"""
-        # 应用相同的预处理
-        image = self.undistort_image_fast(image)
-        self.background_image = self.perspective_transform(
-            image, self.src_points, self.dst_points, self.output_width, self.output_height
-        )
 
 class ImageRecognitionAPI(QObject):
-    """图像识别 API 类 - 轮询版本 + YOLO检测"""
+    """图像识别 API 类 - 优化版本，使用线程池和队列"""
     
     def __init__(self):
         super().__init__()
         self.camera = None
         self.current_frame = None
         self.processed_frame = None
-        self.is_streaming = False  # 摄像头流状态
+        self.is_streaming = False
         self.current_model_path = ""
         self.current_camera_index = "0"
+        
+        # 队列系统
+        self.frame_queue = Queue(maxsize=10)  # 帧队列
+        self.result_queue = Queue(maxsize=10)  # 结果队列
+        self.frame_counter = 0
+        
+        # 线程池
+        self.detection_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="detection")
+        self.pending_futures = {}  # 跟踪待处理的任务
         
         # YOLO检测器
         self.yolo_detector = YOLODetector()
@@ -631,6 +667,7 @@ class ImageRecognitionAPI(QObject):
             'hamburgerSizeMax': 11.3,
             'realWidthCm': 29,
             'realHeightCm': 18.5,
+            'backgroundImagePath': '',  # 背景图像路径
             'srcPoints': {
                 'topLeft': {'x': 510, 'y': 270},
                 'topRight': {'x': 1170, 'y': 270},
@@ -646,9 +683,69 @@ class ImageRecognitionAPI(QObject):
         self.detection_delay = 1.0
         self.last_detection_time = 0
         
-        # 视频流线程控制
+        # 线程控制
         self.video_thread = None
         self.video_thread_running = False
+        self.result_processor_thread = None
+        self.result_processor_running = False
+        
+        # 性能统计
+        self.detection_times = []
+        self.queue_sizes = {'frame': 0, 'result': 0}
+    
+    def _detection_worker(self, frame_data: FrameData) -> DetectionResult:
+        """检测工作函数，在线程池中执行"""
+        start_time = time.time()
+        try:
+            detections, processed_frame = self.yolo_detector.detect_objects(frame_data.frame)
+            detection_time = time.time() - start_time
+            
+            # 记录检测时间
+            self.detection_times.append(detection_time)
+            if len(self.detection_times) > 100:  # 只保留最近100次的记录
+                self.detection_times.pop(0)
+            
+            return DetectionResult(
+                detections=detections,
+                processed_frame=processed_frame,
+                frame_id=frame_data.frame_id,
+                timestamp=frame_data.timestamp
+            )
+        except Exception as e:
+            print(f"检测工作函数错误: {e}")
+            return DetectionResult(
+                detections=[],
+                processed_frame=frame_data.frame,
+                frame_id=frame_data.frame_id,
+                timestamp=frame_data.timestamp
+            )
+    
+    def _result_processor_thread(self):
+        """结果处理线程"""
+        print("结果处理线程启动")
+        
+        while self.result_processor_running:
+            try:
+                # 从结果队列获取结果
+                result = self.result_queue.get(timeout=0.1)
+                
+                # 更新检测结果
+                self.detected_objects = result.detections
+                self.processed_frame = result.processed_frame
+                
+                # 清理已完成的Future
+                if result.frame_id in self.pending_futures:
+                    del self.pending_futures[result.frame_id]
+                
+                # 更新队列大小统计
+                self.queue_sizes['result'] = self.result_queue.qsize()
+                
+            except Empty:
+                continue
+            except Exception as e:
+                print(f"结果处理线程错误: {e}")
+        
+        print("结果处理线程停止")
     
     @pyqtSlot(str, result=str)
     def start_camera(self, camera_index: str) -> str:
@@ -680,15 +777,28 @@ class ImageRecognitionAPI(QObject):
             self.current_camera_index = camera_index
             self.is_streaming = True
             
-            # 设置背景图像（第一帧）
-            ret, frame = self.camera.read()
-            if ret:
-                self.yolo_detector.set_background_image(frame)
+            # 清空队列
+            while not self.frame_queue.empty():
+                try:
+                    self.frame_queue.get_nowait()
+                except Empty:
+                    break
             
-            # 启动视频流线程
+            while not self.result_queue.empty():
+                try:
+                    self.result_queue.get_nowait()
+                except Empty:
+                    break
+            
+            # 启动线程
             self.video_thread_running = True
+            self.result_processor_running = True
+            
             self.video_thread = threading.Thread(target=self._video_stream_thread, daemon=True)
+            self.result_processor_thread = threading.Thread(target=self._result_processor_thread, daemon=True)
+            
             self.video_thread.start()
+            self.result_processor_thread.start()
             
             result = json.dumps({'success': True, 'message': f'摄像头 {camera_idx} 启动成功'}, ensure_ascii=False)
             print(f"start_camera result: {result}")
@@ -697,34 +807,37 @@ class ImageRecognitionAPI(QObject):
             error_result = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False)
             print(f"start_camera error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(result=str)
     def stop_camera(self) -> str:
         """停止摄像头"""
         try:
             print("Stopping camera")
             
-    
-    @pyqtSlot(result=str)
-    def stop_camera(self) -> str:
-        """停止摄像头"""
-        try:
-            print("Stopping camera")
-            
-            # 停止视频流线程
+            # 停止线程
             self.video_thread_running = False
+            self.result_processor_running = False
+            
             if self.video_thread and self.video_thread.is_alive():
-                self.video_thread.join(timeout=2.0)  # 等待线程结束，最多2秒
+                self.video_thread.join(timeout=2.0)
+            
+            if self.result_processor_thread and self.result_processor_thread.is_alive():
+                self.result_processor_thread.join(timeout=2.0)
             
             self.is_streaming = False
             if self.camera:
                 self.camera.release()
                 self.camera = None
             
-            # 清空帧数据
+            # 清空数据
             self.current_frame = None
             self.processed_frame = None
             self.detected_objects = []
+            
+            # 取消待处理的任务
+            for future in self.pending_futures.values():
+                future.cancel()
+            self.pending_futures.clear()
             
             result = json.dumps({'success': True, 'message': '摄像头已停止'}, ensure_ascii=False)
             print(f"stop_camera result: {result}")
@@ -780,6 +893,10 @@ class ImageRecognitionAPI(QObject):
             if 'scoreThresh' in params:
                 self.yolo_detector.score_thresh = params['scoreThresh'] / 100.0
             
+            # 更新背景图像路径
+            if 'backgroundImagePath' in params:
+                self.yolo_detector.set_background_image_path(params['backgroundImagePath'])
+            
             delay_seconds = params.get('delaySeconds', 1.0)
             if delay_seconds > 0:
                 self.detection_delay = delay_seconds
@@ -810,9 +927,8 @@ class ImageRecognitionAPI(QObject):
     
     @pyqtSlot(result=str)
     def get_current_frame(self) -> str:
-        """获取当前处理后的图像帧 - 只有在摄像头启动时才返回帧"""
+        """获取当前处理后的图像帧"""
         try:
-            # 检查摄像头是否正在运行
             if not self.is_streaming or self.processed_frame is None:
                 return json.dumps({'success': False, 'error': '摄像头未启动或没有可用的图像帧'}, ensure_ascii=False)
             
@@ -835,7 +951,7 @@ class ImageRecognitionAPI(QObject):
     
     @pyqtSlot(result=str)
     def get_detection_results(self) -> str:
-        """获取检测结果 - 只有在摄像头启动时才返回结果"""
+        """获取检测结果"""
         try:
             if not self.is_streaming:
                 return json.dumps({'objects': []}, ensure_ascii=False)
@@ -870,6 +986,9 @@ class ImageRecognitionAPI(QObject):
     def export_report(self, format_type: str = 'json') -> str:
         """导出检测报告"""
         try:
+            # 计算性能统计
+            avg_detection_time = sum(self.detection_times) / len(self.detection_times) if self.detection_times else 0
+            
             report_data = {
                 'timestamp': time.time(),
                 'model_path': self.current_model_path,
@@ -879,7 +998,13 @@ class ImageRecognitionAPI(QObject):
                 'detected_objects': self.detected_objects,
                 'total_objects': len(self.detected_objects),
                 'anomaly_count': len([obj for obj in self.detected_objects 
-                                    if obj.get('type') in ['异物', '缺陷']])
+                                    if obj.get('type') in ['异物', '缺陷']]),
+                'performance_stats': {
+                    'avg_detection_time': avg_detection_time,
+                    'fps': self.fps_counter,
+                    'queue_sizes': self.queue_sizes,
+                    'pending_tasks': len(self.pending_futures)
+                }
             }
             
             filename = f'detection_report_{int(time.time())}.{format_type}'
@@ -900,24 +1025,31 @@ class ImageRecognitionAPI(QObject):
     def get_system_status(self) -> str:
         """获取系统状态"""
         try:
+            avg_detection_time = sum(self.detection_times) / len(self.detection_times) if self.detection_times else 0
+            
             status = {
                 'fps': self.fps_counter,
                 'cpuUsage': psutil.cpu_percent(),
                 'memoryUsage': psutil.virtual_memory().percent,
-                'gpuUsage': 0
+                'gpuUsage': 0,
+                'avgDetectionTime': avg_detection_time,
+                'queueSizes': self.queue_sizes,
+                'pendingTasks': len(self.pending_futures)
             }
             result = json.dumps(status, ensure_ascii=False)
             return result
         except Exception as e:
             error_result = json.dumps({
-                'fps': 0, 'cpuUsage': 0, 'memoryUsage': 0, 'gpuUsage': 0, 'error': str(e)
+                'fps': 0, 'cpuUsage': 0, 'memoryUsage': 0, 'gpuUsage': 0, 
+                'avgDetectionTime': 0, 'queueSizes': {'frame': 0, 'result': 0},
+                'pendingTasks': 0, 'error': str(e)
             }, ensure_ascii=False)
             print(f"get_system_status error: {error_result}")
             return error_result
 
     def _video_stream_thread(self):
-        """视频流处理线程 - 只有在摄像头启动时才运行"""
-        print("Video stream thread started")
+        """视频流处理线程 - 优化版本"""
+        print("视频流线程启动")
         
         while self.video_thread_running and self.is_streaming and self.camera:
             try:
@@ -927,24 +1059,63 @@ class ImageRecognitionAPI(QObject):
                     break
                 
                 self.current_frame = frame.copy()
-                
-                # 根据延迟设置执行目标检测
                 current_time = time.time()
+                
+                # 根据延迟设置决定是否进行检测
                 if (current_time - self.last_detection_time) >= self.detection_delay:
-                    detections, processed_frame = self.yolo_detector.detect_objects(frame)
-                    self.detected_objects = detections
-                    self.processed_frame = processed_frame
-                    self.last_detection_time = current_time
+                    # 创建帧数据
+                    frame_data = FrameData(
+                        frame=frame.copy(),
+                        timestamp=current_time,
+                        frame_id=self.frame_counter
+                    )
+                    
+                    # 尝试将帧添加到队列
+                    try:
+                        self.frame_queue.put_nowait(frame_data)
+                        
+                        # 提交检测任务到线程池
+                        future = self.detection_executor.submit(self._detection_worker, frame_data)
+                        self.pending_futures[self.frame_counter] = future
+                        
+                        # 设置回调函数
+                        future.add_done_callback(lambda f, fid=self.frame_counter: self._on_detection_complete(f, fid))
+                        
+                        self.frame_counter += 1
+                        self.last_detection_time = current_time
+                        
+                    except:
+                        # 队列满了，跳过这一帧
+                        pass
+                
+                # 更新队列大小统计
+                self.queue_sizes['frame'] = self.frame_queue.qsize()
                 
                 self._update_fps()
-                
                 time.sleep(0.033)  # 约30 FPS
                 
             except Exception as e:
-                print(f"Video stream thread error: {e}")
+                print(f"视频流线程错误: {e}")
                 break
         
-        print("Video stream thread stopped")
+        print("视频流线程停止")
+    
+    def _on_detection_complete(self, future: Future, frame_id: int):
+        """检测完成回调"""
+        try:
+            result = future.result()
+            # 将结果放入结果队列
+            try:
+                self.result_queue.put_nowait(result)
+            except:
+                # 结果队列满了，丢弃旧结果
+                try:
+                    self.result_queue.get_nowait()
+                    self.result_queue.put_nowait(result)
+                except:
+                    pass
+        except Exception as e:
+            print(f"检测完成回调错误: {e}")
     
     def _update_fps(self):
         """更新FPS计数"""
@@ -958,7 +1129,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('图像识别系统 - YOLO检测版')
+        self.setWindowTitle('图像识别系统 - 优化版YOLO检测')
         self.setGeometry(100, 100, 1400, 900)
         
         # 创建中央部件
@@ -1016,7 +1187,7 @@ class MainWindow(QMainWindow):
     def inject_debug_script(self):
         """注入调试脚本"""
         debug_script = """
-        console.log('Debug script injected - YOLO Detection Version');
+        console.log('Debug script injected - Optimized YOLO Detection Version');
         
         // 检查 QWebChannel 是否可用
         if (typeof qt !== 'undefined' && qt.webChannelTransport) {
@@ -1045,8 +1216,8 @@ def main():
     app = QApplication(sys.argv)
     
     # 设置应用程序属性
-    app.setApplicationName('图像识别系统 - YOLO检测版')
-    app.setApplicationVersion('3.0.0')
+    app.setApplicationName('图像识别系统 - 优化版YOLO检测')
+    app.setApplicationVersion('4.0.0')
     
     # 创建主窗口
     window = MainWindow()
@@ -1054,7 +1225,8 @@ def main():
     
     print("WebEngine Remote Debugging enabled on port 9222")
     print("You can access it at: http://localhost:9222")
-    print("YOLO Detection System Ready!")
+    print("Optimized YOLO Detection System Ready!")
+    print("Features: Thread Pool + Queue System + Background Image Loading")
     
     # 运行应用
     sys.exit(app.exec_())
