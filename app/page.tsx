@@ -266,7 +266,7 @@ export default function ImageRecognitionDashboard() {
         // 从消息中提取文件路径
         const pathMatch = result.message.match(/报告已导出: (.+)/)
         const filePath = pathMatch ? pathMatch[1] : "未知路径"
-        showSuccess(`检测报告导出成功！\n路径: ${filePath}`, 5000)
+        showSuccess(`检测报告导出��功！\n路径: ${filePath}`, 5000)
       } else {
         showError(result.error || "导出报告失败")
       }
