@@ -1,0 +1,62 @@
+{
+  "timestamp": 1752550480.6934245,
+  "model_path": "./model/best_float32-3.tflite",
+  "camera_index": "0",
+  "image_params": {
+    "contrast": 101,
+    "brightness": 100,
+    "saturation": 100,
+    "blur": 0,
+    "delaySeconds": 0.1,
+    "objThresh": 2,
+    "nmsThresh": 10,
+    "scoreThresh": 0,
+    "perspectiveEnabled": true,
+    "distortionEnabled": true,
+    "focalLength": 1298.55,
+    "cameraHeight": 13,
+    "targetHeight": 2.7,
+    "hamburgerSizeMin": 10,
+    "hamburgerSizeMax": 13,
+    "realWidthCm": 29,
+    "realHeightCm": 18.5,
+    "srcPoints": {
+      "topLeft": {
+        "x": 650,
+        "y": 330
+      },
+      "topRight": {
+        "x": 1425,
+        "y": 330
+      },
+      "bottomRight": {
+        "x": 1830,
+        "y": 889
+      },
+      "bottomLeft": {
+        "x": 230,
+        "y": 889
+      }
+    },
+    "distortionK1": -44.9,
+    "distortionK2": 25.1,
+    "distortionP1": 0.04,
+    "distortionP2": 0.02,
+    "distortionK3": -7.9
+  },
+  "recognition_settings": {},
+  "detected_objects": [
+    {
+      "id": "obj_1752550480_4589",
+      "type": "Burrito",
+      "confidence": 0.06191031262278557,
+      "x": 0.9725663661956787,
+      "y": 0.4797647297382355,
+      "width": 0.055320918560028076,
+      "height": 0.5501362681388855,
+      "class_id": 2
+    }
+  ],
+  "total_objects": 1,
+  "anomaly_count": 0
+}

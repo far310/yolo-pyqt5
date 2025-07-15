@@ -53,7 +53,9 @@ class YOLODetector:
         self.model_path = model_path
         self.input_details = None
         self.output_details = None
-        
+        # 获取输入张量的形状
+        self.size = None
+        self.original_size =None
         # YOLO类别
         self.classes = [
             "Hamburger", "Shreddedchicken", "Burrito", "Slicedroastbeef", "Shreddedpork",
@@ -133,6 +135,8 @@ class YOLODetector:
             self.interpreter.allocate_tensors()
             self.input_details = self.interpreter.get_input_details()
             self.output_details = self.interpreter.get_output_details()
+            input_shape = self.input_details[0]["shape"]
+            self.size = (input_shape[1], input_shape[2])
             self.model_path = model_path
             print(f"YOLO模型加载成功: {model_path}")
             return True
@@ -188,12 +192,45 @@ class YOLODetector:
         result[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
         
         return result
-    
+    # ==== 根据输入图像的大小和原始图像的尺寸，调整边界框的位置和大小。 ====
+    def adjust_boxes(size, boxes, original_size):
+        """
+        根据输入图像的大小和原始图像的尺寸，调整边界框的位置和大小。
+
+        Args:
+            size (tuple): 当前输入图像的尺寸 (宽度, 高度)。
+            result_boxes: 检测出的边界框，格式为 [x_center, y_center, width, height]。
+            original_size (tuple): 原始图像的尺寸 (宽度, 高度)。
+
+        Returns:
+            numpy.ndarray: 调整后的边界框，格式为 [x_min, y_min, x_max, y_max]。
+        """
+        img_width, img_height = size
+        target_width, target_height = original_size
+        # print(f"size======{size}")
+        # print(f"original_size======{original_size}")
+        # 获取缩放比例和填充
+        gain = min(img_width / target_width, img_height / target_height)
+        pad_w = round((img_width - target_width * gain) / 2 - 0.1)  # 水平填充
+        pad_h = round((img_height - target_height * gain) / 2 - 0.1)  # 垂直填充
+        # print(f"size======{gain}")
+        # print(f"pad======{pad_w, pad_h}")
+        # 将中心点 (cx, cy) + 宽高 (w, h) 转换为 (x_min, y_min, x_max, y_max) 的批量操作
+        boxes[:, 0] = (boxes[:, 0] - boxes[:, 2] / 2 - pad_w) / gain  # x_min
+        boxes[:, 1] = (boxes[:, 1] - boxes[:, 3] / 2 - pad_h) / gain  # y_min
+        boxes[:, 2] = boxes[:, 2] / gain  # w 缩放
+        boxes[:, 3] = boxes[:, 3] / gain  # h 缩放
+        # print(f"boxes=========={boxes}")
+        return boxes
+
+
     def postprocess_detections(self, output, original_image_shape):
+        original_size = original_image_shape[:2]
         """后处理检测结果"""
-        if len(output.shape) == 3:
-            output = output[0]
-        
+        print(f"original_image_shape:{original_image_shape}")
+        output[:, [0, 2]] *= self.size[0]
+        output[:, [1, 3]] *= self.size[1]
+        output = output[0]
         output = output.T
         boxes = output[..., :4]
         scores = np.max(output[..., 4:], axis=1)
@@ -201,13 +238,14 @@ class YOLODetector:
         
         # 应用NMS
         indices = cv2.dnn.NMSBoxes(
-            boxes.tolist(), scores.tolist(), 
+            boxes, scores, 
             self.obj_thresh, self.nms_thresh
         )
-        
+        print(f"应用NMS:{indices}")
         detections = []
         if len(indices) > 0:
             for i in indices.flatten():
+               
                 box = boxes[i]
                 score = scores[i]
                 class_id = class_ids[i]
@@ -319,12 +357,13 @@ class YOLODetector:
             
             # 反量化（如果需要）
             output_scale, output_zero_point = self.output_details[0]["quantization"]
+            print(f"{output_scale} {output_scale != 0}")
             if output_scale != 0:  # 量化模型
                 output = (output.astype(np.float32) - output_zero_point) * output_scale
             
             # 后处理
             detections = self.postprocess_detections(output, perspective_image.shape)
-            
+            print(f"后处理")
             # 检测背景变化
             if detections:
                 is_different, similarity = self.detect_background_change(perspective_image, detections)
@@ -340,9 +379,9 @@ class YOLODetector:
                         'height': perspective_image.shape[0],
                         'similarity': similarity
                     })
-            
+            print(f"后处理:{detections}")
             return detections
-            
+          
         except Exception as e:
             print(f"目标检测错误: {e}")
             return []
@@ -369,10 +408,10 @@ class ImageRecognitionAPI(QObject):
         self.is_streaming = False  # 摄像头流状态
         self.current_model_path = ""
         self.current_camera_index = "0"
-        
+
         # YOLO检测器
         self.yolo_detector = YOLODetector()
-        
+
         # 图像参数
         self.image_params = {
             'contrast': 100,
@@ -399,58 +438,58 @@ class ImageRecognitionAPI(QObject):
                 'bottomLeft': {'x': 230, 'y': 889}
             }
         }
-        
+
         self.recognition_settings = {}
         self.detected_objects = []
         self.fps_counter = 0
         self.last_fps_time = time.time()
         self.detection_delay = 1.0
         self.last_detection_time = 0
-        
+
         # 视频流线程控制
         self.video_thread = None
         self.video_thread_running = False
-    
+
     @pyqtSlot(str, result=str)
     def start_camera(self, camera_index: str) -> str:
         """启动摄像头"""
         try:
             print(f"Starting camera with index: {camera_index}")
-            
+
             try:
                 camera_idx = int(camera_index)
             except ValueError:
                 return json.dumps({'success': False, 'error': '无效的摄像头索引'}, ensure_ascii=False)
-            
+
             if camera_idx < 0 or camera_idx > 10:
                 return json.dumps({'success': False, 'error': '摄像头索引必须在0-10之间'}, ensure_ascii=False)
-            
+
             # 停止现有的摄像头
             if self.camera:
                 self.stop_camera()
-            
+
             self.camera = cv2.VideoCapture(camera_idx)
             if not self.camera.isOpened():
                 return json.dumps({'success': False, 'error': f'无法打开摄像头 {camera_idx}'}, ensure_ascii=False)
-            
+
             # 设置摄像头参数
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
             self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
             self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
-            
+
             self.current_camera_index = camera_index
             self.is_streaming = True
-            
+
             # 设置背景图像（第一帧）
             ret, frame = self.camera.read()
             if ret:
                 self.yolo_detector.set_background_image(frame)
-            
+
             # 启动视频流线程
             self.video_thread_running = True
             self.video_thread = threading.Thread(target=self._video_stream_thread, daemon=True)
             self.video_thread.start()
-            
+
             result = json.dumps({'success': True, 'message': f'摄像头 {camera_idx} 启动成功'}, ensure_ascii=False)
             print(f"start_camera result: {result}")
             return result
@@ -458,28 +497,28 @@ class ImageRecognitionAPI(QObject):
             error_result = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False)
             print(f"start_camera error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(result=str)
     def stop_camera(self) -> str:
         """停止摄像头"""
         try:
             print("Stopping camera")
-            
+
             # 停止视频流线程
             self.video_thread_running = False
             if self.video_thread and self.video_thread.is_alive():
                 self.video_thread.join(timeout=2.0)  # 等待线程结束，最多2秒
-            
+
             self.is_streaming = False
             if self.camera:
                 self.camera.release()
                 self.camera = None
-            
+
             # 清空帧数据
             self.current_frame = None
             self.processed_frame = None
             self.detected_objects = []
-            
+
             result = json.dumps({'success': True, 'message': '摄像头已停止'}, ensure_ascii=False)
             print(f"stop_camera result: {result}")
             return result
@@ -487,22 +526,22 @@ class ImageRecognitionAPI(QObject):
             error_result = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False)
             print(f"stop_camera error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(str, result=str)
     def load_model(self, model_path: str) -> str:
         """加载AI模型"""
         try:
             print(f"Loading model: {model_path}")
-            
+
             if not os.path.exists(model_path):
                 result = json.dumps({
-                    'success': True, 
+                    'success': True,
                     'message': f'模型加载成功 (模拟): {model_path}'
                 }, ensure_ascii=False)
                 print(f"load_model result (mock): {result}")
                 self.current_model_path = model_path
                 return result
-            
+
             # 加载YOLO模型
             success = self.yolo_detector.load_model(model_path)
             if success:
@@ -510,14 +549,14 @@ class ImageRecognitionAPI(QObject):
                 result = json.dumps({'success': True, 'message': f'YOLO模型加载成功: {model_path}'}, ensure_ascii=False)
             else:
                 result = json.dumps({'success': False, 'error': f'YOLO模型加载失败: {model_path}'}, ensure_ascii=False)
-            
+
             print(f"load_model result: {result}")
             return result
         except Exception as e:
             error_result = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False)
             print(f"load_model error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(str, result=str)
     def set_image_params(self, params_json: str) -> str:
         """设置图像处理参数"""
@@ -525,7 +564,7 @@ class ImageRecognitionAPI(QObject):
             print(f"Setting image params: {params_json}")
             params = json.loads(params_json)
             self.image_params.update(params)
-            
+
             # 更新YOLO检测器参数
             if 'objThresh' in params:
                 self.yolo_detector.obj_thresh = params['objThresh'] / 100.0
@@ -533,11 +572,11 @@ class ImageRecognitionAPI(QObject):
                 self.yolo_detector.nms_thresh = params['nmsThresh'] / 100.0
             if 'scoreThresh' in params:
                 self.yolo_detector.score_thresh = params['scoreThresh'] / 100.0
-            
+
             delay_seconds = params.get('delaySeconds', 1.0)
             if delay_seconds > 0:
                 self.detection_delay = delay_seconds
-            
+
             result = json.dumps({'success': True, 'message': '图像参数已更新'}, ensure_ascii=False)
             print(f"set_image_params result: {result}")
             return result
@@ -545,7 +584,7 @@ class ImageRecognitionAPI(QObject):
             error_result = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False)
             print(f"set_image_params error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(str, result=str)
     def set_recognition_settings(self, settings_json: str) -> str:
         """设置识别功能"""
@@ -553,7 +592,7 @@ class ImageRecognitionAPI(QObject):
             print(f"Setting recognition settings: {settings_json}")
             settings = json.loads(settings_json)
             self.recognition_settings = settings
-            
+
             result = json.dumps({'success': True, 'message': '识别设置已更新'}, ensure_ascii=False)
             print(f"set_recognition_settings result: {result}")
             return result
@@ -561,7 +600,7 @@ class ImageRecognitionAPI(QObject):
             error_result = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False)
             print(f"set_recognition_settings error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(result=str)
     def get_current_frame(self) -> str:
         """获取当前处理后的图像帧 - 只有在摄像头启动时才返回帧"""
@@ -569,48 +608,48 @@ class ImageRecognitionAPI(QObject):
             # 检查摄像头是否正在运行
             if not self.is_streaming or self.processed_frame is None:
                 return json.dumps({'success': False, 'error': '摄像头未启动或没有可用的图像帧'}, ensure_ascii=False)
-            
+
             # 编码图像为base64
             _, buffer = cv2.imencode('.jpg', self.processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             import base64
             img_base64 = base64.b64encode(buffer).decode('utf-8')
-            
+
             result = json.dumps({
                 'success': True,
                 'image': f'data:image/jpeg;base64,{img_base64}',
                 'timestamp': time.time()
             }, ensure_ascii=False)
-            
+
             return result
         except Exception as e:
             error_result = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False)
             print(f"get_current_frame error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(result=str)
     def get_detection_results(self) -> str:
         """获取检测结果 - 只有在摄像头启动时才返回结果"""
         try:
             if not self.is_streaming:
                 return json.dumps({'objects': []}, ensure_ascii=False)
-            
+
             result = json.dumps({'objects': self.detected_objects}, ensure_ascii=False)
             return result
         except Exception as e:
             error_result = json.dumps({'objects': [], 'error': str(e)}, ensure_ascii=False)
             print(f"get_detection_results error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(str, result=str)
     def save_image(self, filename: str = "") -> str:
         """保存当前图像"""
         try:
             if not self.is_streaming or self.current_frame is None:
                 return json.dumps({'success': False, 'error': '摄像头未启动或没有可保存的图像'}, ensure_ascii=False)
-            
+
             if not filename:
                 filename = f'captured_image_{int(time.time())}.jpg'
-            
+
             cv2.imwrite(filename, self.current_frame)
             result = json.dumps({'success': True, 'message': f'图像已保存: {filename}'}, ensure_ascii=False)
             print(f"save_image result: {result}")
@@ -619,7 +658,7 @@ class ImageRecognitionAPI(QObject):
             error_result = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False)
             print(f"save_image error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(str, result=str)
     def export_report(self, format_type: str = 'json') -> str:
         """导出检测报告"""
@@ -632,16 +671,16 @@ class ImageRecognitionAPI(QObject):
                 'recognition_settings': self.recognition_settings,
                 'detected_objects': self.detected_objects,
                 'total_objects': len(self.detected_objects),
-                'anomaly_count': len([obj for obj in self.detected_objects 
+                'anomaly_count': len([obj for obj in self.detected_objects
                                     if obj.get('type') in ['异物', '缺陷']])
             }
-            
+
             filename = f'detection_report_{int(time.time())}.{format_type}'
-            
+
             if format_type == 'json':
                 with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(report_data, f, ensure_ascii=False, indent=2)
-            
+
             result = json.dumps({'success': True, 'message': f'报告已导出: {filename}'}, ensure_ascii=False)
             print(f"export_report result: {result}")
             return result
@@ -649,7 +688,7 @@ class ImageRecognitionAPI(QObject):
             error_result = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False)
             print(f"export_report error: {error_result}")
             return error_result
-    
+
     @pyqtSlot(result=str)
     def get_system_status(self) -> str:
         """获取系统状态"""
@@ -676,7 +715,7 @@ class ImageRecognitionAPI(QObject):
                 x, y, w, h = int(obj['x']), int(obj['y']), int(obj['width']), int(obj['height'])
                 confidence = obj['confidence']
                 obj_type = obj['type']
-                
+
                 # 根据类型选择颜色
                 if obj_type in ['异物', '缺陷']:
                     color = (0, 0, 255)  # 红色
@@ -684,58 +723,59 @@ class ImageRecognitionAPI(QObject):
                     color = (0, 255, 0)  # 绿色
                 else:
                     color = (255, 0, 0)  # 蓝色
-                
+
                 # 绘制边界框
                 cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-                
+
                 # 创建标签
                 label = f'{obj_type}: {confidence:.2f}'
                 if 'size' in obj:
                     label += f' ({obj["size"]})'
                 if 'actual_width_cm' in obj:
                     label += f' {obj["actual_width_cm"]:.1f}cm'
-                
+
                 # 绘制标签背景和文字
                 label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
                 cv2.rectangle(frame, (x, y - label_size[1] - 10), (x + label_size[0], y), color, -1)
                 cv2.putText(frame, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-            
+                print("绘制标签背景和文字")
             return frame
         except Exception as e:
             print(f"Draw detections error: {e}")
             return frame
-    
+
     def _video_stream_thread(self):
         """视频流处理线程 - 只有在摄像头启动时才运行"""
         print("Video stream thread started")
-        
+
         while self.video_thread_running and self.is_streaming and self.camera:
             try:
                 ret, frame = self.camera.read()
                 if not ret:
                     print("Failed to read frame from camera")
                     break
-                
+
                 self.current_frame = frame.copy()
-                
+
                 # 根据延迟设置执行目标检测
                 current_time = time.time()
                 if (current_time - self.last_detection_time) >= self.detection_delay:
                     self.detected_objects = self.yolo_detector.detect_objects(frame)
                     self.last_detection_time = current_time
-                
+
                 # 应用图像处理并绘制检测结果
                 processed_frame = self._apply_image_processing(frame)
+                print("应用图像处理并绘制检测结果")
                 self.processed_frame = self._draw_detections(processed_frame.copy())
-                
+
                 self._update_fps()
-                
+
                 time.sleep(0.033)  # 约30 FPS
-                
+
             except Exception as e:
                 print(f"Video stream thread error: {e}")
                 break
-        
+
         print("Video stream thread stopped")
     
     def _apply_image_processing(self, frame):
