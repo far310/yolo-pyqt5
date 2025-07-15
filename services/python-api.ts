@@ -146,18 +146,6 @@ class PythonAPI {
           memoryUsage: 60,
           gpuUsage: 0,
         }
-      case "set_background_image_path":
-        return { success: true, message: `背景图像路径已设置: ${args[0]} (模拟)` }
-      case "get_background_image_status":
-        return {
-          success: true,
-          isSet: args[0] ? true : false,
-          path: args[0] || "",
-          isValid: true,
-          message: "背景图像状态 (模拟)",
-        }
-      case "clear_background_image":
-        return { success: true, message: "背景图像已清除 (模拟)" }
       default:
         return { success: true, message: "操作完成 (模拟)" }
     }
@@ -230,27 +218,6 @@ class PythonAPI {
       console.error("Connection test failed:", error)
       return false
     }
-  }
-
-  // 设置背景图像路径
-  async setBackgroundImagePath(imagePath: string): Promise<any> {
-    return await this.callPythonMethod("set_background_image_path", imagePath)
-  }
-
-  // 获取背景图像状态
-  async getBackgroundImageStatus(): Promise<{
-    success: boolean
-    isSet: boolean
-    path?: string
-    isValid?: boolean
-    message?: string
-  }> {
-    return await this.callPythonMethod("get_background_image_status")
-  }
-
-  // 清除背景图像
-  async clearBackgroundImage(): Promise<any> {
-    return await this.callPythonMethod("clear_background_image")
   }
 }
 
