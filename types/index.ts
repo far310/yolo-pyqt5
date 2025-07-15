@@ -39,6 +39,8 @@ export interface ImageParams {
   // 实际尺寸参数
   realWidthCm: number
   realHeightCm: number
+  // 背景图像路径
+  backgroundImagePath: string
 }
 
 export interface RecognitionSettings {
