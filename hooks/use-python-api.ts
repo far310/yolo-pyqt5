@@ -21,13 +21,6 @@ export function usePythonAPI() {
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const statusIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
-  // 添加背景图像状态
-  const [backgroundImageStatus, setBackgroundImageStatus] = useState({
-    isSet: false,
-    path: "",
-    isValid: false,
-  })
-
   // 启动轮询
   const startPolling = useCallback(() => {
     console.log("Starting polling...")
@@ -235,77 +228,17 @@ export function usePythonAPI() {
     }
   }, [])
 
-  // 设置背景图像路径
-  const setBackgroundImagePath = useCallback(async (imagePath: string) => {
-    try {
-      const result = await pythonAPI.setBackgroundImagePath(imagePath)
-      if (result.success) {
-        // 更新背景图像状态
-        setBackgroundImageStatus({
-          isSet: true,
-          path: imagePath,
-          isValid: true,
-        })
-      }
-      return result
-    } catch (error) {
-      console.error("Failed to set background image path:", error)
-      throw error
-    }
-  }, [])
-
-  // 清除背景图像
-  const clearBackgroundImage = useCallback(async () => {
-    try {
-      const result = await pythonAPI.clearBackgroundImage()
-      if (result.success) {
-        // 清除背景图像状态
-        setBackgroundImageStatus({
-          isSet: false,
-          path: "",
-          isValid: false,
-        })
-      }
-      return result
-    } catch (error) {
-      console.error("Failed to clear background image:", error)
-      throw error
-    }
-  }, [])
-
-  // 获取背景图像状态
-  const getBackgroundImageStatus = useCallback(async () => {
-    try {
-      const status = await pythonAPI.getBackgroundImageStatus()
-      if (status.success) {
-        setBackgroundImageStatus({
-          isSet: status.isSet,
-          path: status.path || "",
-          isValid: status.isValid || false,
-        })
-      }
-      return status
-    } catch (error) {
-      console.error("Failed to get background image status:", error)
-      throw error
-    }
-  }, [])
-
   return {
     isConnected,
     isStreaming, // 暴露流状态
     systemStatus,
     currentFrame, // 从轮询获取的当前帧
     detectedObjects, // 从轮询获取的检测结果
-    backgroundImageStatus, // 背景图像状态
     startCamera,
     stopCamera,
     loadModel,
     updateImageParams,
     updateRecognitionSettings,
-    setBackgroundImagePath, // 设置背景图像路径
-    clearBackgroundImage, // 清除背景图像
-    getBackgroundImageStatus, // 获取背景图像状态
     getDetectionResults,
     saveImage,
     exportReport,

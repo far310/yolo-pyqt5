@@ -479,31 +479,6 @@ export function ImageParamsControl({
             </div>
           )}
         </div>
-
-        {/* 背景图像设置 */}
-        <div className="space-y-2">
-          <SectionHeader
-            title="背景图像设置"
-            isCollapsed={collapsedSections.backgroundImage || false}
-            onToggle={() => onToggleSection("backgroundImage")}
-          />
-          {!collapsedSections.backgroundImage && (
-            <div className="space-y-4 pl-4">
-              <div className="space-y-2">
-                <Label>背景图像路径</Label>
-                <Input
-                  type="text"
-                  placeholder="输入背景图像文件路径 (如: ./background.jpg)"
-                  value={imageParams.backgroundImagePath || ""}
-                  onChange={(e) => updateParam("backgroundImagePath", e.target.value)}
-                />
-                <p className="text-xs text-gray-500">
-                  设置用于背景变化检测的参考图像路径，支持 .jpg, .png, .bmp 等格式
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
       </CardContent>
     </Card>
   )
