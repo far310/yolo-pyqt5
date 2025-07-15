@@ -184,12 +184,20 @@ export default function ImageRecognitionDashboard() {
   )
 
   // 切换折叠状态
-  const toggleSection = (section: string) => {
-    setCollapsedSections((prev) => ({
-      ...prev,
-      [section]: !prev[section],
-    }))
-  }
+  const toggleSection = useCallback(
+    (section: string) => {
+      console.log(`Toggling section: ${section}, current state:`, collapsedSections[section])
+      setCollapsedSections((prev) => {
+        const newState = {
+          ...prev,
+          [section]: !prev[section],
+        }
+        console.log(`New collapsed state for ${section}:`, newState[section])
+        return newState
+      })
+    },
+    [collapsedSections],
+  )
 
   // 重置参数
   const resetParams = () => {

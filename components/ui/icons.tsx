@@ -187,6 +187,23 @@ export function ChevronDown({ className = "", size = 16 }: IconProps) {
   )
 }
 
+export function ChevronUp({ className = "", size = 16 }: IconProps) {
+  return (
+    <svg
+      className={`icon ${className}`}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      {/* Arrow pointing up */}
+      <polyline points="18,15 12,9 6,15" />
+    </svg>
+  )
+}
+
 export function ChevronRight({ className = "", size = 16 }: IconProps) {
   return (
     <svg

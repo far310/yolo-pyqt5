@@ -366,7 +366,7 @@ class ImageRecognitionAPI(QObject):
         self.camera = None
         self.current_frame = None
         self.processed_frame = None
-        self.is_streaming = False
+        self.is_streaming = False  # 摄像头流状态
         self.current_model_path = ""
         self.current_camera_index = "0"
         
@@ -406,6 +406,10 @@ class ImageRecognitionAPI(QObject):
         self.last_fps_time = time.time()
         self.detection_delay = 1.0
         self.last_detection_time = 0
+        
+        # 视频流线程控制
+        self.video_thread = None
+        self.video_thread_running = False
     
     @pyqtSlot(str, result=str)
     def start_camera(self, camera_index: str) -> str:
@@ -420,6 +424,10 @@ class ImageRecognitionAPI(QObject):
             
             if camera_idx < 0 or camera_idx > 10:
                 return json.dumps({'success': False, 'error': '摄像头索引必须在0-10之间'}, ensure_ascii=False)
+            
+            # 停止现有的摄像头
+            if self.camera:
+                self.stop_camera()
             
             self.camera = cv2.VideoCapture(camera_idx)
             if not self.camera.isOpened():
@@ -438,7 +446,10 @@ class ImageRecognitionAPI(QObject):
             if ret:
                 self.yolo_detector.set_background_image(frame)
             
-            threading.Thread(target=self._video_stream_thread, daemon=True).start()
+            # 启动视频流线程
+            self.video_thread_running = True
+            self.video_thread = threading.Thread(target=self._video_stream_thread, daemon=True)
+            self.video_thread.start()
             
             result = json.dumps({'success': True, 'message': f'摄像头 {camera_idx} 启动成功'}, ensure_ascii=False)
             print(f"start_camera result: {result}")
@@ -453,10 +464,21 @@ class ImageRecognitionAPI(QObject):
         """停止摄像头"""
         try:
             print("Stopping camera")
+            
+            # 停止视频流线程
+            self.video_thread_running = False
+            if self.video_thread and self.video_thread.is_alive():
+                self.video_thread.join(timeout=2.0)  # 等待线程结束，最多2秒
+            
             self.is_streaming = False
             if self.camera:
                 self.camera.release()
                 self.camera = None
+            
+            # 清空帧数据
+            self.current_frame = None
+            self.processed_frame = None
+            self.detected_objects = []
             
             result = json.dumps({'success': True, 'message': '摄像头已停止'}, ensure_ascii=False)
             print(f"stop_camera result: {result}")
@@ -542,10 +564,11 @@ class ImageRecognitionAPI(QObject):
     
     @pyqtSlot(result=str)
     def get_current_frame(self) -> str:
-        """获取当前处理后的图像帧"""
+        """获取当前处理后的图像帧 - 只有在摄像头启动时才返回帧"""
         try:
-            if self.processed_frame is None:
-                return json.dumps({'success': False, 'error': '没有可用的图像帧'}, ensure_ascii=False)
+            # 检查摄像头是否正在运行
+            if not self.is_streaming or self.processed_frame is None:
+                return json.dumps({'success': False, 'error': '摄像头未启动或没有可用的图像帧'}, ensure_ascii=False)
             
             # 编码图像为base64
             _, buffer = cv2.imencode('.jpg', self.processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -566,8 +589,11 @@ class ImageRecognitionAPI(QObject):
     
     @pyqtSlot(result=str)
     def get_detection_results(self) -> str:
-        """获取检测结果"""
+        """获取检测结果 - 只有在摄像头启动时才返回结果"""
         try:
+            if not self.is_streaming:
+                return json.dumps({'objects': []}, ensure_ascii=False)
+            
             result = json.dumps({'objects': self.detected_objects}, ensure_ascii=False)
             return result
         except Exception as e:
@@ -579,8 +605,8 @@ class ImageRecognitionAPI(QObject):
     def save_image(self, filename: str = "") -> str:
         """保存当前图像"""
         try:
-            if self.current_frame is None:
-                return json.dumps({'success': False, 'error': '没有可保存的图像'}, ensure_ascii=False)
+            if not self.is_streaming or self.current_frame is None:
+                return json.dumps({'success': False, 'error': '摄像头未启动或没有可保存的图像'}, ensure_ascii=False)
             
             if not filename:
                 filename = f'captured_image_{int(time.time())}.jpg'
@@ -680,10 +706,16 @@ class ImageRecognitionAPI(QObject):
             return frame
     
     def _video_stream_thread(self):
-        """视频流处理线程"""
-        while self.is_streaming and self.camera:
-            ret, frame = self.camera.read()
-            if ret:
+        """视频流处理线程 - 只有在摄像头启动时才运行"""
+        print("Video stream thread started")
+        
+        while self.video_thread_running and self.is_streaming and self.camera:
+            try:
+                ret, frame = self.camera.read()
+                if not ret:
+                    print("Failed to read frame from camera")
+                    break
+                
                 self.current_frame = frame.copy()
                 
                 # 根据延迟设置执行目标检测
@@ -691,13 +723,20 @@ class ImageRecognitionAPI(QObject):
                 if (current_time - self.last_detection_time) >= self.detection_delay:
                     self.detected_objects = self.yolo_detector.detect_objects(frame)
                     self.last_detection_time = current_time
+                
                 # 应用图像处理并绘制检测结果
                 processed_frame = self._apply_image_processing(frame)
                 self.processed_frame = self._draw_detections(processed_frame.copy())
                 
                 self._update_fps()
-            
-            time.sleep(0.033)  # 约30 FPS
+                
+                time.sleep(0.033)  # 约30 FPS
+                
+            except Exception as e:
+                print(f"Video stream thread error: {e}")
+                break
+        
+        print("Video stream thread stopped")
     
     def _apply_image_processing(self, frame):
         """应用图像处理参数"""

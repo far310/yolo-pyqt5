@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { pythonAPI } from "@/services/python-api"
 import type { DetectedObject, ImageParams, RecognitionSettings } from "@/types"
 
 export function usePythonAPI() {
   const [isConnected, setIsConnected] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false) // 添加流状态跟踪
   const [systemStatus, setSystemStatus] = useState({
     fps: 0,
     cpuUsage: 0,
@@ -15,59 +16,77 @@ export function usePythonAPI() {
   const [currentFrame, setCurrentFrame] = useState<string>("")
   const [detectedObjects, setDetectedObjects] = useState<DetectedObject[]>([])
 
-  // 轮询获取数据
-  useEffect(() => {
-    let frameInterval: NodeJS.Timeout
-    let detectionInterval: NodeJS.Timeout
-    let statusInterval: NodeJS.Timeout
+  // 使用 useRef 来存储定时器引用
+  const frameIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const statusIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
-    const startPolling = () => {
-      // 获取图像帧 - 每100ms
-      frameInterval = setInterval(async () => {
-        try {
-          const result = await pythonAPI.getCurrentFrame()
-          if (result.success && result.image) {
-            setCurrentFrame(result.image)
-          }
-        } catch (error) {
-          console.error("Failed to get frame:", error)
-        }
-      }, 100)
+  // 启动轮询
+  const startPolling = useCallback(() => {
+    console.log("Starting polling...")
 
-      // 获取检测结果 - 每200ms
-      detectionInterval = setInterval(async () => {
-        try {
-          const result = await pythonAPI.getDetectionResults()
-          if (result.objects) {
-            setDetectedObjects(result.objects)
-          }
-        } catch (error) {
-          console.error("Failed to get detection results:", error)
-        }
-      }, 200)
+    // 清除现有的定时器
+    stopPolling()
 
-      // 获取系统状态 - 每1000ms
-      statusInterval = setInterval(async () => {
-        try {
-          const status = await pythonAPI.getSystemStatus()
-          setSystemStatus({
-            fps: status.fps || 0,
-            cpuUsage: status.cpuUsage || 0,
-            memoryUsage: status.memoryUsage || 0,
-            gpuUsage: status.gpuUsage || 0,
-          })
-        } catch (error) {
-          console.error("Failed to get system status:", error)
+    // 获取图像帧 - 每100ms
+    frameIntervalRef.current = setInterval(async () => {
+      if (!isStreaming) return // 只有在流状态下才获取帧
+
+      try {
+        const result = await pythonAPI.getCurrentFrame()
+        if (result.success && result.image) {
+          setCurrentFrame(result.image)
         }
-      }, 1000)
+      } catch (error) {
+        console.error("Failed to get frame:", error)
+      }
+    }, 100)
+
+    // 获取检测结果 - 每200ms
+    detectionIntervalRef.current = setInterval(async () => {
+      if (!isStreaming) return // 只有在流状态下才获取检测结果
+
+      try {
+        const result = await pythonAPI.getDetectionResults()
+        if (result.objects) {
+          setDetectedObjects(result.objects)
+        }
+      } catch (error) {
+        console.error("Failed to get detection results:", error)
+      }
+    }, 200)
+
+    // 获取系统状态 - 每1000ms（这个可以一直运行）
+    statusIntervalRef.current = setInterval(async () => {
+      try {
+        const status = await pythonAPI.getSystemStatus()
+        setSystemStatus({
+          fps: status.fps || 0,
+          cpuUsage: status.cpuUsage || 0,
+          memoryUsage: status.memoryUsage || 0,
+          gpuUsage: status.gpuUsage || 0,
+        })
+      } catch (error) {
+        console.error("Failed to get system status:", error)
+      }
+    }, 1000)
+  }, [isStreaming])
+
+  // 停止轮询
+  const stopPolling = useCallback(() => {
+    console.log("Stopping polling...")
+
+    if (frameIntervalRef.current) {
+      clearInterval(frameIntervalRef.current)
+      frameIntervalRef.current = null
     }
-
-    startPolling()
-
-    return () => {
-      if (frameInterval) clearInterval(frameInterval)
-      if (detectionInterval) clearInterval(detectionInterval)
-      if (statusInterval) clearInterval(statusInterval)
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current)
+      detectionIntervalRef.current = null
+    }
+    if (statusIntervalRef.current) {
+      clearInterval(statusIntervalRef.current)
+      statusIntervalRef.current = null
     }
   }, [])
 
@@ -89,9 +108,47 @@ export function usePythonAPI() {
     return () => clearInterval(interval)
   }, [])
 
+  // 当流状态改变时，启动或停止轮询
+  useEffect(() => {
+    if (isStreaming) {
+      startPolling()
+    } else {
+      // 停止帧和检测结果轮询，但保持系统状态轮询
+      if (frameIntervalRef.current) {
+        clearInterval(frameIntervalRef.current)
+        frameIntervalRef.current = null
+      }
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current)
+        detectionIntervalRef.current = null
+      }
+
+      // 清空当前帧和检测结果
+      setCurrentFrame("")
+      setDetectedObjects([])
+    }
+
+    return () => {
+      if (!isStreaming) {
+        stopPolling()
+      }
+    }
+  }, [isStreaming, startPolling, stopPolling])
+
+  // 组件卸载时清理
+  useEffect(() => {
+    return () => {
+      stopPolling()
+    }
+  }, [stopPolling])
+
   const startCamera = useCallback(async (deviceId: string) => {
     try {
+      console.log("Starting camera...")
       const result = await pythonAPI.startCamera(deviceId)
+      if (result.success) {
+        setIsStreaming(true) // 设置流状态为true，这会触发轮询开始
+      }
       return result
     } catch (error) {
       console.error("Failed to start camera:", error)
@@ -101,10 +158,9 @@ export function usePythonAPI() {
 
   const stopCamera = useCallback(async () => {
     try {
+      console.log("Stopping camera...")
       const result = await pythonAPI.stopCamera()
-      // 清空当前帧
-      setCurrentFrame("")
-      setDetectedObjects([])
+      setIsStreaming(false) // 设置流状态为false，这会停止轮询
       return result
     } catch (error) {
       console.error("Failed to stop camera:", error)
@@ -174,6 +230,7 @@ export function usePythonAPI() {
 
   return {
     isConnected,
+    isStreaming, // 暴露流状态
     systemStatus,
     currentFrame, // 从轮询获取的当前帧
     detectedObjects, // 从轮询获取的检测结果
