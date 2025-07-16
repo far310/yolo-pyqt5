@@ -62,7 +62,7 @@ export default function ImageRecognitionDashboard() {
     brightness: 100,
     saturation: 100,
     blur: 0,
-    delaySeconds: 1, // 延迟设置
+    delaySeconds: 0, // 延迟设置
     objThresh: 10,
     nmsThresh: 10,
     scoreThresh: 0,
@@ -206,7 +206,7 @@ export default function ImageRecognitionDashboard() {
       brightness: 100,
       saturation: 100,
       blur: 0,
-      delaySeconds: 1,
+      delaySeconds: 0,
       objThresh: 10,
       nmsThresh: 10,
       scoreThresh: 0,

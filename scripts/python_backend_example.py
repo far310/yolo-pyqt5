@@ -205,7 +205,7 @@ class YOLODetector:
         newcameramtx, _ = cv2.getOptimalNewCameraMatrix(
             self.camera_matrix, self.dist_coeffs, image_size, 1.0
         )
-        self.map1, self.map2 = cv2.init_undistortRectifyMap(
+        self.map1, self.map2 = cv2.initUndistortRectifyMap(
             self.camera_matrix, self.dist_coeffs, None, 
             newcameramtx, image_size, cv2.CV_16SC2
         )
@@ -521,7 +521,7 @@ class YOLODetector:
         
             # 获取输出
             output_data = self.interpreter.get_tensor(self.output_details[0]["index"])
-        
+            print(f"获取输出{output_data}")
             # 反量化 - 使用缓存的量化参数
             if self.output_scale != 0:  # 量化模型
                 output_data = (output_data.astype(np.float32) - self.output_zero_point) * self.output_scale
@@ -532,7 +532,7 @@ class YOLODetector:
         
             # 后处理
             result_boxes, result_scores, result_class_ids = self.postprocess(output_data)
-        
+            print(f"后处理{result_boxes}")
             detections = []
             if len(result_boxes) > 0:
                 result_boxes = self.adjust_boxes(
@@ -618,7 +618,7 @@ class ImageRecognitionAPI(QObject):
             'brightness': 100,
             'saturation': 100,
             'blur': 0,
-            'delaySeconds': 1.0,
+            'delaySeconds': 0,
             'objThresh': 10,
             'nmsThresh': 10,
             'scoreThresh': 0,
@@ -643,7 +643,7 @@ class ImageRecognitionAPI(QObject):
         self.detected_objects = []
         self.fps_counter = 0
         self.last_fps_time = time.time()
-        self.detection_delay = 1.0
+        self.detection_delay =0
         self.last_detection_time = 0
         
         # 视频流线程控制
@@ -773,7 +773,7 @@ class ImageRecognitionAPI(QObject):
             if 'scoreThresh' in params:
                 self.yolo_detector.score_thresh = params['scoreThresh'] / 100.0
             
-            delay_seconds = params.get('delaySeconds', 1.0)
+            delay_seconds = params.get('delaySeconds', 0)
             if delay_seconds > 0:
                 self.detection_delay = delay_seconds
             
@@ -911,7 +911,7 @@ class ImageRecognitionAPI(QObject):
     def _video_stream_thread(self):
         """视频流处理线程 - 只有在摄像头启动时才运行"""
         print("Video stream thread started")
-        
+        print(f"只有在摄像头启动时才运行")
         while self.video_thread_running and self.is_streaming and self.camera:
             try:
                 ret, frame = self.camera.read()
@@ -920,10 +920,11 @@ class ImageRecognitionAPI(QObject):
                     break
                 
                 self.current_frame = frame.copy()
-                
+                print(f"只有在摄像头启动时才运行1")
                 # 根据延迟设置执行目标检测
                 current_time = time.time()
                 if (current_time - self.last_detection_time) >= self.detection_delay:
+                    print(f"只有在摄像头启动时才运行2")
                     detections, processed_frame = self.yolo_detector.detect_objects(frame)
                     self.detected_objects = detections
                     self.processed_frame = processed_frame
