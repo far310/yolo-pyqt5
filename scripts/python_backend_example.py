@@ -6,7 +6,7 @@ Python QWebEngineView 后端代码 - 轮询版本 + YOLO检测
 # 启用调试模式（必须在 QApplication 之前设置）
 import os
 
-from scripts.utils import (
+from utils import (
     compute_pixel_per_cm,
     init_undistort_maps,
     adjust_boxes,
@@ -923,7 +923,7 @@ class ImageRecognitionAPI(QObject):
                     "principalPointY",
                 ]
             ):
-                self.camera_matrix = np.array(
+                self.yolo_detector.camera_matrix = np.array(
                     [
                         [
                             params.get("focalLengthX", self.camera_matrix[0][0]),
@@ -938,9 +938,11 @@ class ImageRecognitionAPI(QObject):
                         [0.0, 0.0, 1.0],
                     ]
                 )
-                # 重新计算畸变矫正映射
-                self.map1, self.map2 = init_undistort_maps(
-                    self.camera_matrix, self.dist_coeffs, self.image_size
+                # 重新初始化畸变矫正映射
+                self.yolo_detector.map1, self.yolo_detector.map2 = init_undistort_maps(
+                    self.yolo_detector.camera_matrix,
+                    self.yolo_detector.dist_coeffs,
+                    self.yolo_detector.image_size,
                 )
 
             # 更新相机高度和目标高度
@@ -961,12 +963,12 @@ class ImageRecognitionAPI(QObject):
             # 更新汉堡尺寸面积分类参数
             if "hamburgerSizeMjMin" in params or "hamburgerSizeMjMax" in params:
                 min_size = params.get(
-                    "hamburgerSizeMjMin", self.yolo_detector.hamburger_size[0]
+                    "hamburgerSizeMjMin", self.yolo_detector.hamburger_mj[0]
                 )
                 max_size = params.get(
-                    "hamburgerSizeMjMax", self.yolo_detector.hamburger_size[1]
+                    "hamburgerSizeMjMax", self.yolo_detector.hamburger_mj[1]
                 )
-                self.yolo_detector.hamburgerSize = (min_size, max_size)
+                self.yolo_detector.hamburger_mj = (min_size, max_size)
 
             # 更新实际尺寸参数
             if "realWidthCm" in params or "realHeightCm" in params:

@@ -4,7 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="ebc4a4dc-9f3d-4a7f-8a20-2435156c6afb" name="更改" comment="最新优化" />
+    <list default="true" id="ebc4a4dc-9f3d-4a7f-8a20-2435156c6afb" name="更改" comment="优化尺寸的值">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -67,7 +69,7 @@
       <option name="presentableId" value="Default" />
       <updated>1752549623682</updated>
       <workItem from="1752549625122" duration="7674000" />
-      <workItem from="1752658971724" duration="13274000" />
+      <workItem from="1752658971724" duration="14013000" />
     </task>
     <task id="LOCAL-00001" summary="优化代码">
       <option name="closed" value="true" />
@@ -101,7 +103,15 @@
       <option name="project" value="LOCAL" />
       <updated>1752733448914</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="优化尺寸的值">
+      <option name="closed" value="true" />
+      <created>1752733682106</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1752733682106</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -163,6 +173,7 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="优化代码" />
     <MESSAGE value="最新优化" />
-    <option name="LAST_COMMIT_MESSAGE" value="最新优化" />
+    <MESSAGE value="优化尺寸的值" />
+    <option name="LAST_COMMIT_MESSAGE" value="优化尺寸的值" />
   </component>
 </project>
