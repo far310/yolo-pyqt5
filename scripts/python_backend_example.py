@@ -926,14 +926,24 @@ class ImageRecognitionAPI(QObject):
                 self.yolo_detector.camera_matrix = np.array(
                     [
                         [
-                            params.get("focalLengthX", self.camera_matrix[0][0]),
+                            params.get(
+                                "focalLengthX", self.yolo_detector.camera_matrix[0][0]
+                            ),
                             0.0,
-                            params.get("principalPointX", self.camera_matrix[0][2]),
+                            params.get(
+                                "principalPointX",
+                                self.yolo_detector.camera_matrix[0][2],
+                            ),
                         ],
                         [
                             0.0,
-                            params.get("focalLengthY", self.camera_matrix[1][1]),
-                            params.get("principalPointY", self.camera_matrix[1][2]),
+                            params.get(
+                                "focalLengthY", self.yolo_detector.camera_matrix[1][1]
+                            ),
+                            params.get(
+                                "principalPointY",
+                                self.yolo_detector.camera_matrix[1][2],
+                            ),
                         ],
                         [0.0, 0.0, 1.0],
                     ]

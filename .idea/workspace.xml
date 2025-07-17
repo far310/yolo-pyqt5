@@ -4,8 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="ebc4a4dc-9f3d-4a7f-8a20-2435156c6afb" name="更改" comment="优化尺寸的值">
+    <list default="true" id="ebc4a4dc-9f3d-4a7f-8a20-2435156c6afb" name="更改" comment="优化bug">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/python_backend_example.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/python_backend_example.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -69,7 +70,7 @@
       <option name="presentableId" value="Default" />
       <updated>1752549623682</updated>
       <workItem from="1752549625122" duration="7674000" />
-      <workItem from="1752658971724" duration="14013000" />
+      <workItem from="1752658971724" duration="14334000" />
     </task>
     <task id="LOCAL-00001" summary="优化代码">
       <option name="closed" value="true" />
@@ -111,7 +112,15 @@
       <option name="project" value="LOCAL" />
       <updated>1752733682106</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="优化bug">
+      <option name="closed" value="true" />
+      <created>1752734517107</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1752734517107</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -174,6 +183,7 @@
     <MESSAGE value="优化代码" />
     <MESSAGE value="最新优化" />
     <MESSAGE value="优化尺寸的值" />
-    <option name="LAST_COMMIT_MESSAGE" value="优化尺寸的值" />
+    <MESSAGE value="优化bug" />
+    <option name="LAST_COMMIT_MESSAGE" value="优化bug" />
   </component>
 </project>
