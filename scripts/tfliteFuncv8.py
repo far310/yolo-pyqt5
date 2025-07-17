@@ -15,7 +15,9 @@ from utils import (
 # 设置阈值和常量
 OBJ_THRESH, NMS_THRESH, SCORE = 0.1, 0.1, 0  # 将阈值调低以查看更多框
 # 小中大，小的小于中的就是小的
-HAMBURGER_SIZE = (10, 13)
+HAMBURGER_SIZE = (9, 11.3)
+# 小中大面积，小的小于中的就是小的
+HAMBURGER_MJ = (95, 143)
 CLASSES = (
     "Hamburger",
     "Shreddedchicken",
@@ -40,12 +42,9 @@ COLOR_PALETTE = np.random.uniform(0, 255, size=(len(CLASSES), 3))
 # SRC_POINTS = [[659, 331], [1417, 331], [1788, 860], [313, 860]]
 # 参考区域四角像素坐标（左上、右上、右下、左下）
 # SRC_POINTS = [[670, 330], [1417, 330], [1788, 885], [300, 885]]
-# SRC_POINTS = [[650, 330], [1425, 330], [1830, 889], [230, 889]]
-# SRC_POINTS = [[650, 230], [1425, 230], [1920, 889], [160, 889]]
-SRC_POINTS = [510,270], [1170, 270], [1500, 710], [140, 710]
+SRC_POINTS = [510, 270], [1170, 270], [1500, 710], [140, 710]
 # 微波炉腔内大小 单位：厘米）
 REAL_WIDTH_CM = 29
-
 REAL_HEIGHT_CM = 18.5
 # 目标高度
 TARGET_HEIGHT = (
@@ -55,35 +54,23 @@ TARGET_HEIGHT = (
 CAMERA_HEIGHT = 13.0  # 相机到微波炉底部的垂直距离
 
 # 焦距
-FX = 1260.15 
-FY = 1256.09 
+FX = 1260.15
+FY = 1256.09
 # 相机内参矩阵（mtx）
-CAMERA_MATRIX = np.array([
-    [1260.15281, 0.0, 971.702426],
-    [0.0, 1256.08744, 504.553169],
-    [0.0, 0.0, 1.0]
-])
+CAMERA_MATRIX = np.array(
+    [[1260.15281, 0.0, 971.702426], [0.0, 1256.08744, 504.553169], [0.0, 0.0, 1.0]]
+)
 
 # 畸变系数（dist） (k1, k2, p1, p2, k3)
-DIST_COEFFS = np.array([[
-    -0.430483648, 0.216393722,
-    -0.000156465611, 0.000104551776,
-    -0.0564557922
-]])
+DIST_COEFFS = np.array(
+    [[-0.430483648, 0.216393722, -0.000156465611, 0.000104551776, -0.0564557922]]
+)
 
 # 旋转向量（rvec）- 使用第一组
-RVEC = np.array([
-    [-0.74272717],
-    [-0.02205108],
-    [-0.00466471]
-])
+RVEC = np.array([[-0.74272717], [-0.02205108], [-0.00466471]])
 
 # 平移向量（tvec）- 使用第一组
-TVEC = np.array([
-    [-8.83518051],
-    [-4.21560336],
-    [15.07577132]
-])
+TVEC = np.array([[-8.83518051], [-4.21560336], [15.07577132]])
 # 1、计算像素比
 PIXEL_PER_CM = compute_pixel_per_cm(SRC_POINTS, REAL_WIDTH_CM, REAL_HEIGHT_CM)
 # 2、 计算输出图像大小（像素）
@@ -280,8 +267,8 @@ def draw(image, boxes, scores, classes):
                 image, (int(x1), int(y1)), (int(x1 + w), int(y1 + h)), color, 2
             )
 
-            # Create the label text with class name and score
-            label = f"{CLASSES[cl]}: {score:.2f},x {int(x1)},y {int(y1)},w {int(w)},h {int(h)} "
+            # Create the label text with class name and score ,x {int(x1)},y {int(y1)},w {int(w)},h {int(h)}
+            label = f"{CLASSES[cl]}: {score:.2f}"
             t1 = time.time()
             if CLASSES[cl] == "Hamburger":
                 # 1. 使用初始检测框的坐标来裁剪出感兴趣区域（Region of Interest, ROI）。
@@ -314,8 +301,10 @@ def draw(image, boxes, scores, classes):
                 if contour_w and contour_h:
                     # 用轮廓尺寸替换你原来的尺寸计算
                     width_cm = contour_w  # / PIXEL_PER_CM
-                    height_cm = contour_h  # / PIXEL_PER_CM
-                    label_text = f"{width_cm:.1f}cm x {height_cm:.1f}cm,jl: {jl:.1f}cm "
+                    height_cm = (
+                        contour_h  # / PIXEL_PER_CM  x {height_cm:.1f}cm,jl: {jl:.1f}cm
+                    )
+                    label_text = f"{width_cm:.1f}cm"
                     x2 = int(x1 + w)
                     cv2.putText(
                         image,
@@ -327,14 +316,35 @@ def draw(image, boxes, scores, classes):
                         1,
                     )
                     if width_cm:
-                        min_size, max_size = HAMBURGER_SIZE
-                        if width_cm <= min_size:
-                            size_label = "small"
-                        elif width_cm < max_size:
-                            size_label = "medium"
-                        else:
+                        width_min, width_max = HAMBURGER_SIZE
+                        mj_min, mj_max = HAMBURGER_MJ
+                        # 计算面积
+                        mj = width_cm * height_cm
+                        # 分类逻辑
+                        if mj <= mj_min:
+                            # 面积太小，先判断是否宽度也小
+                            if width_cm <= width_min:
+                                size_label = "small"
+                            else:
+                                size_label = "medium"
+                        elif mj > mj_min and mj <= mj_max:
+                            # 面积太大，先判断宽度是否也大
+                            if width_cm > width_max:
+                                size_label = "large"
+                            else:
+                                size_label = "medium"
+                        elif mj > mj_max:
+                            # 面积太大，先判断宽度是否也大
                             size_label = "large"
-                        label = f"{size_label} {CLASSES[cl]}: {score:.2f},x {int(x1)},y {int(y1)},w {int(w)},h {int(h)} "
+                        # else:
+                        #     # 面积在中间区间，再根据宽度精细判断
+                        #     if width_cm <= width_min:
+                        #         size_label = "small"
+                        #     elif width_cm > width_max:
+                        #         size_label = "large"
+                        #     else:
+                        #         size_label = "medium" ,x {int(x1)},y {int(y1)},w {int(w)},h {int(h)}
+                        label = f"{size_label} {CLASSES[cl]}: {score:.2f}"
                         print(
                             f"轮廓尺寸:{size_label} {CLASSES[cl]}: {width_cm:.2f} cm x {height_cm:.2f} cm，,x {int(x1)},y {int(y1)},w {int(w)},h {int(h)}"
                         )
@@ -467,7 +477,7 @@ def myFunc(interpreter, image):
     # === 实时阶段：每帧图像处理 ===
     # 假设 frame 是当前帧图像
     image = undistort_image_fast(image, map1, map2)
-    print(f"⏱️ 畸变矫正耗时: {time.time() - t1:.3f}s")
+    # print(f"⏱️ 畸变矫正耗时: {time.time() - t1:.3f}s")
     # 调整图片大小以匹配输入张量的形状
     t1 = time.time()
     # 透视校正
@@ -482,9 +492,8 @@ def myFunc(interpreter, image):
     input_data = input_data.transpose((0, 2, 3, 1))  # .astype(np.int8)
     t1 = time.time()
     # input_data = input_data.transpose((0, 2, 3, 1))
-    # input_data = (input_data / input_scale + input_zero_point).astype(
-    #     np.int8
-    # )  # 如果是float 需要注释掉
+    if input_scale != 0:  # 量化模型
+        input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
     # 模型输入
     interpreter.set_tensor(input_details[0]["index"], input_data)
     # 执行推理
@@ -496,9 +505,10 @@ def myFunc(interpreter, image):
     # print(f"output_data===={output_data}")
     # print(f"output_data[:, :4] ===={output_data[:, :4]}")
     # 反量化：将量化输出转换回浮点数
-    # output_data = (
-    #     output_data.astype(np.float32) - output_zero_point
-    # ) * output_scale  # 如果是float 需要注释掉
+    if output_scale != 0:  # 量化模型
+        output_data = (
+            output_data.astype(np.float32) - output_zero_point
+        ) * output_scale
     # print(f"pred将量化输出转换回浮点数[:, :4] ===={pred[:, :4]}")
     # print(f"original_size[:, :4] ===={ original_size[1]},{original_size[0]}")
     # 将预测框的坐标从归一化形式转换回原始图像尺寸

@@ -2,9 +2,13 @@
 
 # dependencies
 /node_modules
-
-# next.js
 /.next/
+# next.js
+
+/.idea
+
+/.idea*
+
 /out/
 
 # production
