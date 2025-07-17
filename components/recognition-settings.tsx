@@ -44,26 +44,26 @@ export function RecognitionSettingsComponent({ settings, onSettingsChange }: Rec
           />
         </div>
 
-        <div className="flex items-center justify-between">
+        {/* <div className="flex items-center justify-between">
           <Label htmlFor="background-change">背景变化检测</Label>
           <Switch
             id="background-change"
             checked={settings.backgroundChangeDetection}
             onCheckedChange={(checked) => updateSettings({ backgroundChangeDetection: checked })}
           />
-        </div>
+        </div> */}
 
-        <div className="flex items-center justify-between">
+        {/* <div className="flex items-center justify-between">
           <Label htmlFor="contour-detection">轮廓检测</Label>
           <Switch
             id="contour-detection"
             checked={settings.contourDetection}
             onCheckedChange={(checked) => updateSettings({ contourDetection: checked })}
           />
-        </div>
+        </div> */}
 
         <div className="flex items-center justify-between">
-          <Label htmlFor="height-correction">高度矫正</Label>
+          <Label htmlFor="height-correction">高度补偿</Label>
           <Switch
             id="height-correction"
             checked={settings.heightCorrection}
@@ -71,7 +71,7 @@ export function RecognitionSettingsComponent({ settings, onSettingsChange }: Rec
           />
         </div>
 
-        <div className="flex items-center justify-between">
+        {/* <div className="flex items-center justify-between">
           <Label htmlFor="edge-detection">边缘检测</Label>
           <Switch
             id="edge-detection"
@@ -87,7 +87,7 @@ export function RecognitionSettingsComponent({ settings, onSettingsChange }: Rec
             checked={settings.colorAnalysis}
             onCheckedChange={(checked) => updateSettings({ colorAnalysis: checked })}
           />
-        </div>
+        </div> */}
       </CardContent>
     </Card>
   )

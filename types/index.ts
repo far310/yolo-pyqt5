@@ -29,16 +29,26 @@ export interface ImageParams {
   distortionP1: number
   distortionP2: number
   distortionK3: number
+  // 相机内参
+  focalLengthX: number
+  focalLengthY: number
+  principalPointX: number
+  principalPointY: number
   // 相机参数
-  focalLength: number
   cameraHeight: number
   targetHeight: number
   // 尺寸分类参数
   hamburgerSizeMin: number
   hamburgerSizeMax: number
+  // 面积分类参数
+  hamburgerSizeMjMin: number
+  hamburgerSizeMjMax: number
   // 实际尺寸参数
   realWidthCm: number
   realHeightCm: number
+  // 图片背景路径
+  backgroundImagePath: string
+  
 }
 
 export interface RecognitionSettings {

@@ -51,7 +51,9 @@ export default function ImageRecognitionDashboard() {
     detectionThreshold: true,
     perspectiveTransform: true,
     distortionCorrection: true,
+    cameraIntrinsics: true,
     cameraParams: true,
+    backgroundImage: true,
     sizeClassification: true,
     realSize: true,
   })
@@ -79,24 +81,38 @@ export default function ImageRecognitionDashboard() {
     distortionP1: 0.04,
     distortionP2: 0.02,
     distortionK3: -7.9,
-    focalLength: 1298.55,
+    // 相机内参 - 与Python后端一致
+    focalLengthX: 1260.15281,
+    focalLengthY: 1256.08744,
+    principalPointX: 971.702426,
+    principalPointY: 504.553169,
     cameraHeight: 13.0,
     targetHeight: 2.7,
-    hamburgerSizeMin: 10,
-    hamburgerSizeMax: 13,
+    hamburgerSizeMin: 9,
+    hamburgerSizeMax: 11.3,
+    hamburgerSizMjeMin: 95,
+    hamburgerSizeMjMax: 143,
     realWidthCm: 29,
     realHeightCm: 18.5,
+    backgroundImagePath: "./img/bg.jpg",
   })
 
   // 识别设置
   const [recognition, setRecognition] = useState<RecognitionSettings>({
-    foreignObjectDetection: false,
-    sizeClassification: false,
+    // 异物识别
+    foreignObjectDetection: true,
+    // 大中小识别
+    sizeClassification: true,
+    // 边缘检测
     edgeDetection: false,
+    // 颜色分析
     colorAnalysis: false,
+    // 背景变化检测
     backgroundChangeDetection: false,
+    // 轮廓检测
     contourDetection: false,
-    heightCorrection: false,
+    // 高度校正
+    heightCorrection: true,
   })
 
   // 新增状态
@@ -223,13 +239,21 @@ export default function ImageRecognitionDashboard() {
       distortionP1: 0.04,
       distortionP2: 0.02,
       distortionK3: -7.9,
-      focalLength: 1298.55,
+      // 相机内参默认值
+      focalLengthX: 1260.15281,
+      focalLengthY: 1256.08744,
+      principalPointX: 971.702426,
+      principalPointY: 504.553169,
       cameraHeight: 13.0,
       targetHeight: 2.7,
-      hamburgerSizeMin: 10,
-      hamburgerSizeMax: 13,
+      hamburgerSizeMin: 9,
+      hamburgerSizeMax: 11.3,
+      hamburgerSizMjeMin: 95,
+      hamburgerSizeMjMax: 143,
       realWidthCm: 29,
       realHeightCm: 18.5,
+      // 背景图像路径默认值
+      backgroundImagePath: "./img/bg.jpg",
     }
     handleImageParamsChange(defaultParams)
   }
@@ -266,7 +290,7 @@ export default function ImageRecognitionDashboard() {
         // 从消息中提取文件路径
         const pathMatch = result.message.match(/报告已导出: (.+)/)
         const filePath = pathMatch ? pathMatch[1] : "未知路径"
-        showSuccess(`检测报告导出��功！\n路径: ${filePath}`, 5000)
+        showSuccess(`检测报告导出成功！\n路径: ${filePath}`, 5000)
       } else {
         showError(result.error || "导出报告失败")
       }

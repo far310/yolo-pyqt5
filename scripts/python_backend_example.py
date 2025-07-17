@@ -214,7 +214,7 @@ class YOLODetector:
             dtype=np.float32,
         )
 
-        # 相机参数 - 与附件一致
+        # 相机内参矩阵 - 与前端一致
         self.camera_matrix = np.array(
             [
                 [1260.15281, 0.0, 971.702426],
@@ -240,12 +240,25 @@ class YOLODetector:
         self.map1, self.map2 = init_undistort_maps(
             self.camera_matrix, self.dist_coeffs, self.image_size
         )
-
-        # 背景图像
-        self.background_image = None
+        self.background_image_path = "./img/bg.jpg"  # 用于背景变化检测
+        self.set_background_image()  # 设置默认背景图像
 
         # 颜色调色板
         self.color_palette = np.random.uniform(0, 255, size=(len(self.classes), 3))
+
+        # 识别参数
+        self.recognition_settings = {
+            # 异物识别
+            "foreignObjectDetection": True,
+            # 尺寸分类
+            "sizeClassification": True,
+            # 透视变换
+            "perspectiveEnabled": True,
+            # 畸变矫正
+            "distortionEnabled": True,
+            # 高度补偿
+            "heightCorrection": False,
+        }
 
         if model_path and os.path.exists(model_path):
             self.load_model(model_path)
@@ -326,25 +339,26 @@ class YOLODetector:
         """绘制检测结果 - 与附件逻辑一致"""
         max_score = 0
         max_class = None
-
-        # 检测背景变化
-        hash_diff, is_different = detects_background_change_by_cosine(
-            image, self.background_image, boxes
-        )
-
-        if is_different:
-            label_text = f"has foreign matter SCORE: {hash_diff:.3f}, {is_different}"
-            cv2.putText(
-                image,
-                label_text,
-                (20, 20),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 0, 255),
-                1,
-            )
-            return image
-
+        if self.recognition_settings.get("foreignObjectDetection", True):
+            # 检测背景变化
+            if self.background_image is not None:
+                hash_diff, is_different = detects_background_change_by_cosine(
+                    image, self.background_image, boxes
+                )
+                if is_different:
+                    label_text = (
+                        f"has foreign matter SCORE: {hash_diff:.3f}, {is_different}"
+                    )
+                    cv2.putText(
+                        image,
+                        label_text,
+                        (20, 20),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 0, 255),
+                        1,
+                    )
+                    return image
         for box, score, cl in zip(boxes, scores, class_ids):
             if score >= self.score_thresh:
                 x1, y1, w, h = box
@@ -361,11 +375,13 @@ class YOLODetector:
                 label = f"{self.classes[cl]}: {score:.2f}"
 
                 # 如果是汉堡，进行尺寸计算
-                if self.classes[cl] == "Hamburger":
-                    # 计算实际尺寸
+                if self.classes[cl] == "Hamburger" and self.recognition_settings.get(
+                    "sizeClassification", False
+                ):
+                    # 计算实际尺寸（只计算一次）
                     contour_w, contour_h = annotate_xywh(box, self.pixel_per_cm)
 
-                    # 高度补偿
+                    # 高度补偿（只计算一次）
                     contour_w = correct_size_with_height(
                         contour_w, self.target_height, self.camera_height
                     )
@@ -387,32 +403,31 @@ class YOLODetector:
                             1,
                         )
 
-                        # 尺寸分类
-                        if width_cm:
-                            width_min, width_max = self.hamburger_size
-                            mj_min, mj_max = self.hamburger_mj
+                        # 尺寸分类（使用已计算的值）
+                        width_min, width_max = self.hamburger_size
+                        mj_min, mj_max = self.hamburger_mj
 
-                            # 计算面积
-                            mj = width_cm * height_cm
+                        # 计算面积
+                        mj = width_cm * height_cm
 
-                            # 分类逻辑
-                            if mj <= mj_min:
-                                if width_cm <= width_min:
-                                    size_label = "small"
-                                else:
-                                    size_label = "medium"
-                            elif mj > mj_min and mj <= mj_max:
-                                if width_cm > width_max:
-                                    size_label = "large"
-                                else:
-                                    size_label = "medium"
-                            elif mj > mj_max:
+                        # 分类逻辑
+                        if mj <= mj_min:
+                            if width_cm <= width_min:
+                                size_label = "small"
+                            else:
+                                size_label = "medium"
+                        elif mj > mj_min and mj <= mj_max:
+                            if width_cm > width_max:
                                 size_label = "large"
+                            else:
+                                size_label = "medium"
+                        elif mj > mj_max:
+                            size_label = "large"
 
-                            label = f"{size_label} {self.classes[cl]}: {score:.2f}"
-                            print(
-                                f"轮廓尺寸:{size_label} {self.classes[cl]}: {width_cm:.2f} cm x {height_cm:.2f} cm"
-                            )
+                        label = f"{size_label} {self.classes[cl]}: {score:.2f}"
+                        print(
+                            f"轮廓尺寸:{size_label} {self.classes[cl]}: {width_cm:.2f} cm x {height_cm:.2f} cm"
+                        )
 
                 # 绘制标签
                 (label_width, label_height), _ = cv2.getTextSize(
@@ -459,19 +474,19 @@ class YOLODetector:
         try:
             # 获取图片原始尺寸
             original_size = image.shape[:2]
-            # 畸变矫正
-            image = undistort_image_fast(image, self.map1, self.map2)
-
-            # 透视校正
-            image = perspective_transform(
-                image,
-                self.src_points,
-                self.dst_points,
-                self.output_width,
-                self.output_height,
-            )
-
-            original_size = image.shape[:2]
+            if self.recognition_settings.get("distortionEnabled", True):
+                # 畸变矫正
+                image = undistort_image_fast(image, self.map1, self.map2)
+            if self.recognition_settings.get("perspectiveEnabled", True):
+                # 透视校正
+                image = perspective_transform(
+                    image,
+                    self.src_points,
+                    self.dst_points,
+                    self.output_width,
+                    self.output_height,
+                )
+                original_size = image.shape[:2]
 
             # 预处理 - 使用缓存的输入尺寸
             input_data = self.preprocess(image, self.model_input_size)
@@ -538,32 +553,39 @@ class YOLODetector:
                         "class_id": int(class_id),
                     }
 
-                    # 如果是汉堡，添加尺寸信息
-                    if self.classes[class_id] == "Hamburger":
+                    # 如果是汉堡，添加尺寸信息（使用已有的计算结果）
+                    if self.classes[
+                        class_id
+                    ] == "Hamburger" and self.recognition_settings.get(
+                        "sizeClassification", False
+                    ):
+                        # 重用 draw_detections 中的计算逻辑，避免重复计算
                         actual_w, actual_h = annotate_xywh(box, self.pixel_per_cm)
-                        actual_w = correct_size_with_height(
-                            actual_w, self.target_height, self.camera_height
-                        )
-
-                        # 尺寸分类
-                        width_min, width_max = self.hamburger_size
-                        mj_min, mj_max = self.hamburger_mj
-                        mj = actual_w * actual_h
-
-                        if mj <= mj_min:
-                            size_category = (
-                                "small" if actual_w <= width_min else "medium"
+                        # 高度补偿
+                        if self.recognition_settings.get("heightCorrection", True):
+                            actual_w = correct_size_with_height(
+                                actual_w, self.target_height, self.camera_height
                             )
-                        elif mj > mj_min and mj <= mj_max:
-                            size_category = (
-                                "large" if actual_w > width_max else "medium"
-                            )
-                        else:
-                            size_category = "large"
+                        if actual_w and actual_h:
+                            # 尺寸分类
+                            width_min, width_max = self.hamburger_size
+                            mj_min, mj_max = self.hamburger_mj
+                            mj = actual_w * actual_h
 
-                        detection["size"] = size_category
-                        detection["actual_width_cm"] = actual_w
-                        detection["actual_height_cm"] = actual_h
+                            if mj <= mj_min:
+                                size_category = (
+                                    "small" if actual_w <= width_min else "medium"
+                                )
+                            elif mj > mj_min and mj <= mj_max:
+                                size_category = (
+                                    "large" if actual_w > width_max else "medium"
+                                )
+                            else:
+                                size_category = "large"
+
+                            detection["size"] = size_category
+                            detection["actual_width_cm"] = actual_w
+                            detection["actual_height_cm"] = actual_h
 
                     detections.append(detection)
 
@@ -573,10 +595,11 @@ class YOLODetector:
             print(f"目标检测错误: {e}")
             return [], image
 
-    def set_background_image(self, image):
+    def set_background_image(self):
+        bg_image = cv2.imread(self.background_image_path)
         """设置背景图像"""
         # 应用相同的预处理
-        image = undistort_image_fast(image, self.map1, self.map2)
+        image = undistort_image_fast(bg_image, self.map1, self.map2)
         self.background_image = perspective_transform(
             image,
             self.src_points,
@@ -618,8 +641,11 @@ class ImageRecognitionAPI(QObject):
             "targetHeight": 2.7,
             "hamburgerSizeMin": 9,
             "hamburgerSizeMax": 11.3,
+            "hamburgerSizeMjMin": 95,
+            "hamburgerSizeMjMax": 143,
             "realWidthCm": 29,
             "realHeightCm": 18.5,
+            "backgroundImagePath": "./img/bg.jpg",
             "srcPoints": {
                 "topLeft": {"x": 510, "y": 270},
                 "topRight": {"x": 1170, "y": 270},
@@ -678,9 +704,9 @@ class ImageRecognitionAPI(QObject):
             self.is_streaming = True
 
             # 设置背景图像（第一帧）
-            ret, frame = self.camera.read()
-            if ret:
-                self.yolo_detector.set_background_image(frame)
+            # ret, frame = self.camera.read()
+            # if ret:
+            #     self.yolo_detector.set_background_image(frame)
 
             # 启动视频流线程
             self.video_thread_running = True
@@ -779,6 +805,22 @@ class ImageRecognitionAPI(QObject):
         try:
             print(f"Setting image params: {params_json}")
             params = json.loads(params_json)
+
+            # 功能依赖检查
+            distortion_enabled = params.get(
+                "distortionEnabled", self.image_params.get("distortionEnabled", True)
+            )
+            perspective_enabled = params.get(
+                "perspectiveEnabled", self.image_params.get("perspectiveEnabled", True)
+            )
+
+            # 检查：如果畸变矫正没开启就不能开启透视变换
+            if perspective_enabled and not distortion_enabled:
+                return json.dumps(
+                    {"success": False, "error": "透视变换功能需要先启用畸变矫正功能"},
+                    ensure_ascii=False,
+                )
+
             self.image_params.update(params)
 
             # 更新YOLO检测器参数
@@ -789,8 +831,195 @@ class ImageRecognitionAPI(QObject):
             if "scoreThresh" in params:
                 self.yolo_detector.score_thresh = params["scoreThresh"] / 100.0
 
+            # 更新透视变换参数
+            if "srcPoints" in params:
+                src_points = params["srcPoints"]
+                self.yolo_detector.src_points = np.array(
+                    [
+                        [src_points["topLeft"]["x"], src_points["topLeft"]["y"]],
+                        [src_points["topRight"]["x"], src_points["topRight"]["y"]],
+                        [
+                            src_points["bottomRight"]["x"],
+                            src_points["bottomRight"]["y"],
+                        ],
+                        [src_points["bottomLeft"]["x"], src_points["bottomLeft"]["y"]],
+                    ],
+                    dtype=np.float32,
+                )
+
+                # 重新计算像素密度和输出尺寸
+                self.yolo_detector.pixel_per_cm = compute_pixel_per_cm(
+                    self.yolo_detector.src_points,
+                    self.yolo_detector.real_width_cm,
+                    self.yolo_detector.real_height_cm,
+                )
+                self.yolo_detector.output_width = int(
+                    self.yolo_detector.real_width_cm * self.yolo_detector.pixel_per_cm
+                )
+                self.yolo_detector.output_height = int(
+                    self.yolo_detector.real_height_cm * self.yolo_detector.pixel_per_cm
+                )
+                self.yolo_detector.dst_points = np.array(
+                    [
+                        [0, 0],
+                        [self.yolo_detector.output_width, 0],
+                        [
+                            self.yolo_detector.output_width,
+                            self.yolo_detector.output_height,
+                        ],
+                        [0, self.yolo_detector.output_height],
+                    ],
+                    dtype=np.float32,
+                )
+
+            # 更新畸变矫正参数
+            if any(
+                key in params
+                for key in [
+                    "distortionK1",
+                    "distortionK2",
+                    "distortionP1",
+                    "distortionP2",
+                    "distortionK3",
+                ]
+            ):
+                # 更新畸变系数
+                self.yolo_detector.dist_coeffs = np.array(
+                    [
+                        [
+                            params.get(
+                                "distortionK1", self.yolo_detector.dist_coeffs[0][0]
+                            ),
+                            params.get(
+                                "distortionK2", self.yolo_detector.dist_coeffs[0][1]
+                            ),
+                            params.get(
+                                "distortionP1", self.yolo_detector.dist_coeffs[0][2]
+                            ),
+                            params.get(
+                                "distortionP2", self.yolo_detector.dist_coeffs[0][3]
+                            ),
+                            params.get(
+                                "distortionK3", self.yolo_detector.dist_coeffs[0][4]
+                            ),
+                        ]
+                    ]
+                )
+
+                # 重新初始化畸变矫正映射
+                self.yolo_detector.map1, self.yolo_detector.map2 = init_undistort_maps(
+                    self.yolo_detector.camera_matrix,
+                    self.yolo_detector.dist_coeffs,
+                    self.yolo_detector.image_size,
+                )
+
+            # 更新相机内参
+            if any(
+                key in params
+                for key in [
+                    "focalLengthX",
+                    "focalLengthY",
+                    "principalPointX",
+                    "principalPointY",
+                ]
+            ):
+                self.camera_matrix = np.array(
+                    [
+                        [
+                            params.get("focalLengthX", self.camera_matrix[0][0]),
+                            0.0,
+                            params.get("principalPointX", self.camera_matrix[0][2]),
+                        ],
+                        [
+                            0.0,
+                            params.get("focalLengthY", self.camera_matrix[1][1]),
+                            params.get("principalPointY", self.camera_matrix[1][2]),
+                        ],
+                        [0.0, 0.0, 1.0],
+                    ]
+                )
+                # 重新计算畸变矫正映射
+                self.map1, self.map2 = init_undistort_maps(
+                    self.camera_matrix, self.dist_coeffs, self.image_size
+                )
+
+            # 更新相机高度和目标高度
+            if "cameraHeight" in params:
+                self.yolo_detector.camera_height = params["cameraHeight"]
+            if "targetHeight" in params:
+                self.yolo_detector.target_height = params["targetHeight"]
+
+            # 更新汉堡尺寸分类参数
+            if "hamburgerSizeMin" in params or "hamburgerSizeMax" in params:
+                min_size = params.get(
+                    "hamburgerSizeMin", self.yolo_detector.hamburger_size[0]
+                )
+                max_size = params.get(
+                    "hamburgerSizeMax", self.yolo_detector.hamburger_size[1]
+                )
+                self.yolo_detector.hamburger_size = (min_size, max_size)
+            # 更新汉堡尺寸面积分类参数
+            if "hamburgerSizeMjMin" in params or "hamburgerSizeMjMax" in params:
+                min_size = params.get(
+                    "hamburgerSizeMjMin", self.yolo_detector.hamburger_size[0]
+                )
+                max_size = params.get(
+                    "hamburgerSizeMjMax", self.yolo_detector.hamburger_size[1]
+                )
+                self.yolo_detector.hamburgerSize = (min_size, max_size)
+
+            # 更新实际尺寸参数
+            if "realWidthCm" in params or "realHeightCm" in params:
+                self.yolo_detector.real_width_cm = params.get(
+                    "realWidthCm", self.yolo_detector.real_width_cm
+                )
+                self.yolo_detector.real_height_cm = params.get(
+                    "realHeightCm", self.yolo_detector.real_height_cm
+                )
+
+                # 重新计算像素密度和输出尺寸
+                self.yolo_detector.pixel_per_cm = compute_pixel_per_cm(
+                    self.yolo_detector.src_points,
+                    self.yolo_detector.real_width_cm,
+                    self.yolo_detector.real_height_cm,
+                )
+                self.yolo_detector.output_width = int(
+                    self.yolo_detector.real_width_cm * self.yolo_detector.pixel_per_cm
+                )
+                self.yolo_detector.output_height = int(
+                    self.yolo_detector.real_height_cm * self.yolo_detector.pixel_per_cm
+                )
+                self.yolo_detector.dst_points = np.array(
+                    [
+                        [0, 0],
+                        [self.yolo_detector.output_width, 0],
+                        [
+                            self.yolo_detector.output_width,
+                            self.yolo_detector.output_height,
+                        ],
+                        [0, self.yolo_detector.output_height],
+                    ],
+                    dtype=np.float32,
+                )
+
+            # 更新背景图像路径
+            if "backgroundImagePath" in params:
+                self.yolo_detector.background_image_path = params["backgroundImagePath"]
+                self.yolo_detector.set_background_image()
+
+            # 更新识别功能开关
+            if "perspectiveEnabled" in params:
+                self.yolo_detector.recognition_settings["perspectiveEnabled"] = params[
+                    "perspectiveEnabled"
+                ]
+            if "distortionEnabled" in params:
+                self.yolo_detector.recognition_settings["distortionEnabled"] = params[
+                    "distortionEnabled"
+                ]
+
+            # 更新延迟参数
             delay_seconds = params.get("delaySeconds", 0)
-            if delay_seconds > 0:
+            if delay_seconds >= 0:
                 self.detection_delay = delay_seconds
 
             result = json.dumps(
@@ -811,8 +1040,45 @@ class ImageRecognitionAPI(QObject):
         try:
             print(f"Setting recognition settings: {settings_json}")
             settings = json.loads(settings_json)
-            self.recognition_settings = settings
 
+            # 功能依赖检查
+            current_distortion = self.yolo_detector.recognition_settings.get(
+                "distortionEnabled", True
+            )
+            current_perspective = self.yolo_detector.recognition_settings.get(
+                "perspectiveEnabled", True
+            )
+
+            size_classification = settings.get("sizeClassification", False)
+            height_correction = settings.get("heightCorrection", False)
+            foreign_object_detection = settings.get("foreignObjectDetection", False)
+
+            # 检查：如果透视变换没开启就不能开启大中小、高度矫正、异物识别
+            if (
+                size_classification or height_correction or foreign_object_detection
+            ) and not current_perspective:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "尺寸分类、高度矫正和异物识别功能需要先启用透视变换功能",
+                    },
+                    ensure_ascii=False,
+                )
+
+            # 检查：如果畸变矫正没开启就不能开启透视变换相关功能
+            if (
+                size_classification or height_correction or foreign_object_detection
+            ) and not current_distortion:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "尺寸分类、高度矫正和异物识别功能需要先启用畸变矫正功能",
+                    },
+                    ensure_ascii=False,
+                )
+
+            # 更新YOLO检测器的识别设置
+            self.yolo_detector.recognition_settings.update(self.recognition_settings)
             result = json.dumps(
                 {"success": True, "message": "识别设置已更新"}, ensure_ascii=False
             )
@@ -886,10 +1152,18 @@ class ImageRecognitionAPI(QObject):
                     {"success": False, "error": "摄像头未启动或没有可保存的图像"},
                     ensure_ascii=False,
                 )
-
+            # 获取当前用户桌面路径（支持中文或英文系统）
+            desktop_path = os.path.join(os.path.expanduser("~"), "桌面")
+            if not os.path.exists(desktop_path):
+                desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+            # 创建保存文件夹路径
+            save_folder = os.path.join(desktop_path, "SavedFrames")
+            os.makedirs(save_folder, exist_ok=True)  # 如果文件夹不存在就创建
+            # 构造保存文件名
             if not filename:
-                filename = f"captured_image_{int(time.time())}.jpg"
-
+                filename = os.path.join(
+                    save_folder, f"captured_image_{int(time.time())}.jpg"
+                )
             cv2.imwrite(filename, self.current_frame)
             result = json.dumps(
                 {"success": True, "message": f"图像已保存: {filename}"},
@@ -924,8 +1198,17 @@ class ImageRecognitionAPI(QObject):
                     ]
                 ),
             }
+            # 获取当前用户桌面路径（支持中文或英文系统）
+            desktop_path = os.path.join(os.path.expanduser("~"), "桌面")
+            if not os.path.exists(desktop_path):
+                desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+            # 创建保存文件夹路径
+            save_folder = os.path.join(desktop_path, "SavedFrames")
+            os.makedirs(save_folder, exist_ok=True)  # 如果文件夹不存在就创建
 
-            filename = f"detection_report_{int(time.time())}.{format_type}"
+            filename = os.path.join(
+                save_folder, f"detection_report_{int(time.time())}.{format_type}"
+            )
 
             if format_type == "json":
                 with open(filename, "w", encoding="utf-8") as f:
@@ -987,6 +1270,7 @@ class ImageRecognitionAPI(QObject):
                 current_time = time.time()
                 if (current_time - self.last_detection_time) >= self.detection_delay:
                     print(f"只有在摄像头启动时才运行2")
+                    frame = self._apply_image_processing(frame)
                     detections, processed_frame = self.yolo_detector.detect_objects(
                         frame
                     )
@@ -1010,6 +1294,30 @@ class ImageRecognitionAPI(QObject):
         if current_time - self.last_fps_time >= 1.0:
             self.last_fps_time = current_time
             self.fps_counter = 30 if self.is_streaming else 0
+
+    # === 基础的图像处理函数 ===
+    def _apply_image_processing(self, frame):
+        """应用图像处理参数"""
+        processed = frame.copy()
+        # 基础图像调整
+        contrast = self.image_params.get("contrast", 100) / 100.0
+        brightness = self.image_params.get("brightness", 100) - 100
+        processed = cv2.convertScaleAbs(processed, alpha=contrast, beta=brightness)
+
+        # 饱和度调整
+        saturation = self.image_params.get("saturation", 100) / 100.0
+        if saturation != 1.0:
+            hsv = cv2.cvtColor(processed, cv2.COLOR_BGR2HSV)
+            hsv[:, :, 1] = np.clip(hsv[:, :, 1] * saturation, 0, 255)
+            processed = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+        # 模糊处理
+        blur = self.image_params.get("blur", 0)
+        if blur > 0:
+            kernel_size = int(blur * 2) + 1
+            processed = cv2.GaussianBlur(processed, (kernel_size, kernel_size), blur)
+
+        return processed
 
 
 class MainWindow(QMainWindow):

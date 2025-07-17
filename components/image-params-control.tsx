@@ -371,6 +371,59 @@ export function ImageParamsControl({
           )}
         </div>
 
+        {/* 相机内参 */}
+        <div className="space-y-2">
+          <SectionHeader
+            title="相机内参"
+            isCollapsed={collapsedSections.cameraIntrinsics}
+            onToggle={() => onToggleSection("cameraIntrinsics")}
+          />
+          {!collapsedSections.cameraIntrinsics && (
+            <div className="space-y-4 pl-4">
+              <div className="space-y-2">
+                <Label>焦距 fx: {imageParams.focalLengthX}</Label>
+                <Slider
+                  value={[imageParams.focalLengthX]}
+                  onValueChange={([value]) => updateParam("focalLengthX", value)}
+                  min={500}
+                  max={2000}
+                  step={0.01}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>焦距 fy: {imageParams.focalLengthY}</Label>
+                <Slider
+                  value={[imageParams.focalLengthY]}
+                  onValueChange={([value]) => updateParam("focalLengthY", value)}
+                  min={500}
+                  max={2000}
+                  step={0.01}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>主点 cx: {imageParams.principalPointX}</Label>
+                <Slider
+                  value={[imageParams.principalPointX]}
+                  onValueChange={([value]) => updateParam("principalPointX", value)}
+                  min={0}
+                  max={2000}
+                  step={0.01}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>主点 cy: {imageParams.principalPointY}</Label>
+                <Slider
+                  value={[imageParams.principalPointY]}
+                  onValueChange={([value]) => updateParam("principalPointY", value)}
+                  min={0}
+                  max={1500}
+                  step={0.01}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* 相机参数 */}
         <div className="space-y-2">
           <SectionHeader
@@ -380,16 +433,6 @@ export function ImageParamsControl({
           />
           {!collapsedSections.cameraParams && (
             <div className="space-y-4 pl-4">
-              <div className="space-y-2">
-                <Label>焦距: {imageParams.focalLength}</Label>
-                <Slider
-                  value={[imageParams.focalLength]}
-                  onValueChange={([value]) => updateParam("focalLength", value)}
-                  min={500}
-                  max={2000}
-                  step={0.01}
-                />
-              </div>
               <div className="space-y-2">
                 <Label>相机高度 (cm): {imageParams.cameraHeight}</Label>
                 <Slider
@@ -414,6 +457,30 @@ export function ImageParamsControl({
           )}
         </div>
 
+        {/* 背景图像设置 */}
+        <div className="space-y-2">
+          <SectionHeader
+            title="背景图像设置"
+            isCollapsed={collapsedSections.backgroundImage}
+            onToggle={() => onToggleSection("backgroundImage")}
+          />
+          {!collapsedSections.backgroundImage && (
+            <div className="space-y-4 pl-4">
+              <div className="space-y-2">
+                <Label>背景图像路径</Label>
+                <Input
+                  type="text"
+                  placeholder="例如: ./img/bg.jpg"
+                  value={imageParams.backgroundImagePath}
+                  onChange={(e) => updateParam("backgroundImagePath", e.target.value)}
+                  className="w-full"
+                />
+                <p className="text-xs text-gray-500">用于异物检测的背景参考图像路径，支持相对路径和绝对路径</p>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* 尺寸分类 */}
         <div className="space-y-2">
           <SectionHeader
@@ -423,6 +490,26 @@ export function ImageParamsControl({
           />
           {!collapsedSections.sizeClassification && (
             <div className="space-y-4 pl-4">
+              <div className="space-y-2">
+                <Label>汉堡最小面积 (cm): {imageParams.hamburgerSizeMjMin}</Label>
+                <Slider
+                  value={[imageParams.hamburgerSizeMjMin]}
+                  onValueChange={([value]) => updateParam("hamburgerSizeMjMin", value)}
+                  min={1}
+                  max={500}
+                  step={0.1}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>汉堡最大面积 (cm): {imageParams.hamburgerSizeMjMax}</Label>
+                <Slider
+                  value={[imageParams.hamburgerSizeMjMax]}
+                  onValueChange={([value]) => updateParam("hamburgerSizeMjMax", value)}
+                  min={1}
+                  max={500}
+                  step={0.1}
+                />
+              </div>
               <div className="space-y-2">
                 <Label>汉堡最小尺寸 (cm): {imageParams.hamburgerSizeMin}</Label>
                 <Slider
