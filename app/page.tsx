@@ -51,6 +51,7 @@ export default function ImageRecognitionDashboard() {
     detectionThreshold: true,
     perspectiveTransform: true,
     distortionCorrection: true,
+    cameraIntrinsics: true,
     cameraParams: true,
     sizeClassification: true,
     realSize: true,
@@ -62,7 +63,7 @@ export default function ImageRecognitionDashboard() {
     brightness: 100,
     saturation: 100,
     blur: 0,
-    delaySeconds: 0, // 延迟设置
+    delaySeconds: 1, // 延迟设置
     objThresh: 10,
     nmsThresh: 10,
     scoreThresh: 0,
@@ -79,7 +80,11 @@ export default function ImageRecognitionDashboard() {
     distortionP1: 0.04,
     distortionP2: 0.02,
     distortionK3: -7.9,
-    focalLength: 1298.55,
+    // 相机内参 - 与Python后端一致
+    focalLengthX: 1260.15281,
+    focalLengthY: 1256.08744,
+    principalPointX: 971.702426,
+    principalPointY: 504.553169,
     cameraHeight: 13.0,
     targetHeight: 2.7,
     hamburgerSizeMin: 10,
@@ -206,7 +211,7 @@ export default function ImageRecognitionDashboard() {
       brightness: 100,
       saturation: 100,
       blur: 0,
-      delaySeconds: 0,
+      delaySeconds: 1,
       objThresh: 10,
       nmsThresh: 10,
       scoreThresh: 0,
@@ -223,7 +228,11 @@ export default function ImageRecognitionDashboard() {
       distortionP1: 0.04,
       distortionP2: 0.02,
       distortionK3: -7.9,
-      focalLength: 1298.55,
+      // 相机内参默认值
+      focalLengthX: 1260.15281,
+      focalLengthY: 1256.08744,
+      principalPointX: 971.702426,
+      principalPointY: 504.553169,
       cameraHeight: 13.0,
       targetHeight: 2.7,
       hamburgerSizeMin: 10,
@@ -266,7 +275,7 @@ export default function ImageRecognitionDashboard() {
         // 从消息中提取文件路径
         const pathMatch = result.message.match(/报告已导出: (.+)/)
         const filePath = pathMatch ? pathMatch[1] : "未知路径"
-        showSuccess(`检测报告导出��功！\n路径: ${filePath}`, 5000)
+        showSuccess(`检测报告导出成功！\n路径: ${filePath}`, 5000)
       } else {
         showError(result.error || "导出报告失败")
       }

@@ -371,6 +371,59 @@ export function ImageParamsControl({
           )}
         </div>
 
+        {/* 相机内参 */}
+        <div className="space-y-2">
+          <SectionHeader
+            title="相机内参"
+            isCollapsed={collapsedSections.cameraIntrinsics}
+            onToggle={() => onToggleSection("cameraIntrinsics")}
+          />
+          {!collapsedSections.cameraIntrinsics && (
+            <div className="space-y-4 pl-4">
+              <div className="space-y-2">
+                <Label>焦距 fx: {imageParams.focalLengthX}</Label>
+                <Slider
+                  value={[imageParams.focalLengthX]}
+                  onValueChange={([value]) => updateParam("focalLengthX", value)}
+                  min={500}
+                  max={2000}
+                  step={0.01}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>焦距 fy: {imageParams.focalLengthY}</Label>
+                <Slider
+                  value={[imageParams.focalLengthY]}
+                  onValueChange={([value]) => updateParam("focalLengthY", value)}
+                  min={500}
+                  max={2000}
+                  step={0.01}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>主点 cx: {imageParams.principalPointX}</Label>
+                <Slider
+                  value={[imageParams.principalPointX]}
+                  onValueChange={([value]) => updateParam("principalPointX", value)}
+                  min={0}
+                  max={2000}
+                  step={0.01}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>主点 cy: {imageParams.principalPointY}</Label>
+                <Slider
+                  value={[imageParams.principalPointY]}
+                  onValueChange={([value]) => updateParam("principalPointY", value)}
+                  min={0}
+                  max={1500}
+                  step={0.01}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* 相机参数 */}
         <div className="space-y-2">
           <SectionHeader
@@ -380,16 +433,6 @@ export function ImageParamsControl({
           />
           {!collapsedSections.cameraParams && (
             <div className="space-y-4 pl-4">
-              <div className="space-y-2">
-                <Label>焦距: {imageParams.focalLength}</Label>
-                <Slider
-                  value={[imageParams.focalLength]}
-                  onValueChange={([value]) => updateParam("focalLength", value)}
-                  min={500}
-                  max={2000}
-                  step={0.01}
-                />
-              </div>
               <div className="space-y-2">
                 <Label>相机高度 (cm): {imageParams.cameraHeight}</Label>
                 <Slider

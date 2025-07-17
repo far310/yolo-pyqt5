@@ -81,6 +81,14 @@ export function ModelSelector({ currentModelPath, modelLoading, onModelChange }:
         </div>
 
         {/* 常用模型路径示例 */}
+        <div className="text-xs text-gray-500">
+          <div className="font-medium mb-1">常用路径示例：</div>
+          <div className="space-y-1">
+            <div>• ./model/yolov5_food.tflite</div>
+            <div>• ./model/yolov8_general.tflite</div>
+            <div>• ./model/best_float32-2.tflite</div>
+          </div>
+        </div>
       </CardContent>
     </Card>
   )

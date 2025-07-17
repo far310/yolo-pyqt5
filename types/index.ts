@@ -29,8 +29,12 @@ export interface ImageParams {
   distortionP1: number
   distortionP2: number
   distortionK3: number
+  // 相机内参
+  focalLengthX: number
+  focalLengthY: number
+  principalPointX: number
+  principalPointY: number
   // 相机参数
-  focalLength: number
   cameraHeight: number
   targetHeight: number
   // 尺寸分类参数
