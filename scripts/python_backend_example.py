@@ -240,7 +240,10 @@ class YOLODetector:
         self.map1, self.map2 = init_undistort_maps(
             self.camera_matrix, self.dist_coeffs, self.image_size
         )
-        self.background_image_path = "./img/bg.jpg"  # 用于背景变化检测
+        
+        # 背景图像路径和背景图像
+        self.background_image_path = "./img/bg.jpg"  # 默认背景图像路径
+        self.background_image = None
         self.set_background_image()  # 设置默认背景图像
 
         # 颜色调色板
@@ -341,23 +344,24 @@ class YOLODetector:
         max_class = None
         if self.recognition_settings.get("foreignObjectDetection", True):
             # 检测背景变化
-            hash_diff, is_different = detects_background_change_by_cosine(
-                image, self.background_image, boxes
-            )
-            if is_different:
-                label_text = (
-                    f"has foreign matter SCORE: {hash_diff:.3f}, {is_different}"
+            if self.background_image is not None:
+                hash_diff, is_different = detects_background_change_by_cosine(
+                    image, self.background_image, boxes
                 )
-                cv2.putText(
-                    image,
-                    label_text,
-                    (20, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 0, 255),
-                    1,
-                )
-                return image
+                if is_different:
+                    label_text = (
+                        f"has foreign matter SCORE: {hash_diff:.3f}, {is_different}"
+                    )
+                    cv2.putText(
+                        image,
+                        label_text,
+                        (20, 20),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 0, 255),
+                        1,
+                    )
+                    return image
         for box, score, cl in zip(boxes, scores, class_ids):
             if score >= self.score_thresh:
                 x1, y1, w, h = box
@@ -514,109 +518,46 @@ class YOLODetector:
 
             # 后处理
             result_boxes, result_scores, result_class_ids = self.postprocess(
-                output_data
+                [output_data]
             )
-            print(f"后处理{result_boxes}")
-            detections = []
-            if len(result_boxes) > 0:
-                result_boxes = adjust_boxes(
-                    self.model_input_size,
-                    np.array(result_boxes, dtype=np.float64),
-                    (original_size[1], original_size[0]),
-                )
 
-                # 绘制检测结果
-                image = self.draw_detections(
-                    image, result_boxes, result_scores, result_class_ids
-                )
+            # 调整边界框坐标
+            result_boxes = adjust_boxes(
+                result_boxes, self.model_input_size, original_size
+            )
 
-                # 转换为标准格式
-                for i, (box, score, class_id) in enumerate(
-                    zip(result_boxes, result_scores, result_class_ids)
-                ):
+            # 绘制检测结果
+            annotated_image = self.draw_detections(
+                image, result_boxes, result_scores, result_class_ids
+            )
+
+            # 转换为检测对象列表
+            detected_objects = []
+            for i, (box, score, class_id) in enumerate(
+                zip(result_boxes, result_scores, result_class_ids)
+            ):
+                if score >= self.score_thresh:
                     x, y, w, h = box
-                    detection = {
-                        "id": f"obj_{int(time.time())}_{i}",
-                        "type": (
-                            self.classes[class_id]
-                            if class_id < len(self.classes)
-                            else "Unknown"
-                        ),
-                        "confidence": float(score),
-                        "x": float(x),
-                        "y": float(y),
-                        "width": float(w),
-                        "height": float(h),
-                        "class_id": int(class_id),
-                    }
+                    detected_objects.append(
+                        {
+                            "id": f"obj_{i}",
+                            "type": self.classes[class_id],
+                            "confidence": float(score),
+                            "size": "medium",  # 默认尺寸
+                            "x": float(x),
+                            "y": float(y),
+                            "width": float(w),
+                            "height": float(h),
+                        }
+                    )
 
-                    # 如果是汉堡，添加尺寸信息（使用已有的计算结果）
-                    if self.classes[
-                        class_id
-                    ] == "Hamburger" and self.recognition_settings.get(
-                        "sizeClassification", False
-                    ):
-                        # 重用 draw_detections 中的计算逻辑，避免重复计算
-                        actual_w, actual_h = annotate_xywh(box, self.pixel_per_cm)
-                        # 高度补偿
-                        if self.recognition_settings.get("heightCorrection", True):
-                            actual_w = correct_size_with_height(
-                                actual_w, self.target_height, self.camera_height
-                            )
-
-                        if actual_w and actual_h:
-                            width_cm = actual_w
-                            height_cm = actual_h
-                            mj = width_cm * height_cm
-
-                            # 尺寸分类
-                            width_min, width_max = self.hamburger_size
-                            mj_min, mj_max = self.hamburger_mj
-
-                            if mj <= mj_min:
-                                if width_cm <= width_min:
-                                    size_label = "small"
-                                else:
-                                    size_label = "medium"
-                            elif mj > mj_min and mj <= mj_max:
-                                if width_cm > width_max:
-                                    size_label = "large"
-                                else:
-                                    size_label = "medium"
-                            elif mj > mj_max:
-                                size_label = "large"
-
-                            detection.update(
-                                {
-                                    "size": size_label,
-                                    "width_cm": width_cm,
-                                    "height_cm": height_cm,
-                                    "area_cm2": mj,
-                                }
-                            )
-
-                    detections.append(detection)
-
-            return detections, image
+            return detected_objects, annotated_image
 
         except Exception as e:
-            print(f"检测过程出错: {e}")
+            print(f"检测过程中出错: {e}")
             return [], image
 
-    def set_background_image(self, image_path=None):
-        """设置背景图像用于背景变化检测"""
-        if image_path is None:
-            image_path = self.background_image_path
-
-        if os.path.exists(image_path):
-            self.background_image = cv2.imread(image_path)
-            print(f"背景图像已设置: {image_path}")
-        else:
-            # 如果没有背景图像，创建一个空的
-            self.background_image = np.zeros((480, 640, 3), dtype=np.uint8)
-            print("使用默认空背景图像")
-
-    def update_detection_params(self, params: dict):
+    def update_detection_params(self, params: Dict[str, Any]):
         """更新检测参数"""
         if "objThresh" in params:
             self.obj_thresh = params["objThresh"] / 100.0
@@ -625,7 +566,7 @@ class YOLODetector:
         if "scoreThresh" in params:
             self.score_thresh = params["scoreThresh"] / 100.0
 
-        # 透视变换参数
+        # 更新透视变换参数
         if "srcPoints" in params:
             src_points = params["srcPoints"]
             self.src_points = np.array(
@@ -638,82 +579,70 @@ class YOLODetector:
                 dtype=np.float32,
             )
 
-        # 畸变矫正参数
+        # 更新畸变矫正参数
         if any(
             key in params
-            for key in [
-                "distortionK1",
-                "distortionK2",
-                "distortionP1",
-                "distortionP2",
-                "distortionK3",
-            ]
+            for key in ["distortionK1", "distortionK2", "distortionP1", "distortionP2", "distortionK3"]
         ):
             self.dist_coeffs = np.array(
                 [
                     [
-                        params.get("distortionK1", -0.430483648) / 100.0,
-                        params.get("distortionK2", 0.216393722) / 100.0,
-                        params.get("distortionP1", -0.000156465611),
-                        params.get("distortionP2", 0.000104551776),
-                        params.get("distortionK3", -0.0564557922) / 100.0,
+                        params.get("distortionK1", self.dist_coeffs[0][0]) / 100.0,
+                        params.get("distortionK2", self.dist_coeffs[0][1]) / 100.0,
+                        params.get("distortionP1", self.dist_coeffs[0][2]),
+                        params.get("distortionP2", self.dist_coeffs[0][3]),
+                        params.get("distortionK3", self.dist_coeffs[0][4]) / 100.0,
                     ]
                 ]
             )
-            # 重新初始化畸变矫正映射
+            # 重新计算畸变矫正映射
             self.map1, self.map2 = init_undistort_maps(
                 self.camera_matrix, self.dist_coeffs, self.image_size
             )
 
-        # 相机内参更新
+        # 更新相机内参
         if any(
             key in params
-            for key in [
-                "focalLengthX",
-                "focalLengthY",
-                "principalPointX",
-                "principalPointY",
-            ]
+            for key in ["focalLengthX", "focalLengthY", "principalPointX", "principalPointY"]
         ):
             self.camera_matrix = np.array(
                 [
                     [
-                        params.get("focalLengthX", 1260.15281),
+                        params.get("focalLengthX", self.camera_matrix[0][0]),
                         0.0,
-                        params.get("principalPointX", 971.702426),
+                        params.get("principalPointX", self.camera_matrix[0][2]),
                     ],
                     [
                         0.0,
-                        params.get("focalLengthY", 1256.08744),
-                        params.get("principalPointY", 504.553169),
+                        params.get("focalLengthY", self.camera_matrix[1][1]),
+                        params.get("principalPointY", self.camera_matrix[1][2]),
                     ],
                     [0.0, 0.0, 1.0],
                 ]
             )
-            # 重新初始化畸变矫正映射
+            # 重新计算畸变矫正映射
             self.map1, self.map2 = init_undistort_maps(
                 self.camera_matrix, self.dist_coeffs, self.image_size
             )
 
-        # 相机参数
+        # 更新相机参数
         if "cameraHeight" in params:
             self.camera_height = params["cameraHeight"]
         if "targetHeight" in params:
             self.target_height = params["targetHeight"]
 
-        # 尺寸分类参数
+        # 更新汉堡尺寸参数
         if "hamburgerSizeMin" in params or "hamburgerSizeMax" in params:
             self.hamburger_size = (
-                params.get("hamburgerSizeMin", 10),
-                params.get("hamburgerSizeMax", 13),
+                params.get("hamburgerSizeMin", self.hamburger_size[0]),
+                params.get("hamburgerSizeMax", self.hamburger_size[1]),
             )
 
-        # 实际尺寸参数
+        # 更新实际尺寸参数
         if "realWidthCm" in params or "realHeightCm" in params:
-            self.real_width_cm = params.get("realWidthCm", 29.0)
-            self.real_height_cm = params.get("realHeightCm", 18.5)
-
-            # 重新计算像素密度和目标点
+            self.real_width_cm = params.get("realWidthCm", self.real_width_cm)
+            self.real_height_cm = params.get("realHeightCm", self.real_height_cm)
+            # 重新计算像素密度和输出尺寸
             self.pixel_per_cm = compute_pixel_per_cm(
                 self.src_points, self.real_width_cm, self.real_height_cm
             )
@@ -729,28 +658,44 @@ class YOLODetector:
                 dtype=np.float32,
             )
 
-        print(f"检测参数已更新: obj_thresh={self.obj_thresh}, nms_thresh={self.nms_thresh}")
+        # 更新背景图像路径
+        if "backgroundImagePath" in params:
+            self.background_image_path = params["backgroundImagePath"]
+            self.set_background_image()
 
-    def update_recognition_settings(self, settings: dict):
+        print(f"检测参数已更新: {params}")
+
+    def set_background_image(self):
+        """设置背景图像"""
+        try:
+            if os.path.exists(self.background_image_path):
+                self.background_image = cv2.imread(self.background_image_path)
+                if self.background_image is not None:
+                    print(f"背景图像加载成功: {self.background_image_path}")
+                else:
+                    print(f"背景图像加载失败: {self.background_image_path}")
+                    self.background_image = None
+            else:
+                print(f"背景图像文件不存在: {self.background_image_path}")
+                self.background_image = None
+        except Exception as e:
+            print(f"设置背景图像时出错: {e}")
+            self.background_image = None
+
+    def update_recognition_settings(self, settings: Dict[str, Any]):
         """更新识别设置"""
-        # 检查依赖关系
-        if not settings.get("distortionEnabled", True) and settings.get(
-            "perspectiveEnabled", False
-        ):
+        # 参数依赖关系检查
+        if settings.get("perspectiveEnabled", False) and not settings.get("distortionEnabled", False):
             print("警告: 透视变换需要先启用畸变矫正")
             settings["perspectiveEnabled"] = False
-
-        if not settings.get("perspectiveEnabled", False):
-            # 如果透视变换未启用，禁用依赖功能
-            if settings.get("sizeClassification", False):
-                print("警告: 尺寸分类需要先启用透视变换")
-                settings["sizeClassification"] = False
-            if settings.get("heightCorrection", False):
-                print("警告: 高度补偿需要先启用透视变换")
-                settings["heightCorrection"] = False
-            if settings.get("foreignObjectDetection", False):
-                print("警告: 异物检测需要先启用透视变换")
-                settings["foreignObjectDetection"] = False
+            
+        if (settings.get("sizeClassification", False) or 
+            settings.get("heightCorrection", False) or 
+            settings.get("foreignObjectDetection", False)) and not settings.get("perspectiveEnabled", False):
+            print("警告: 尺寸分类、高度补偿、异物检测需要先启用透视变换")
+            settings["sizeClassification"] = False
+            settings["heightCorrection"] = False
+            settings["foreignObjectDetection"] = False
 
         self.recognition_settings.update(settings)
         print(f"识别设置已更新: {self.recognition_settings}")
@@ -761,18 +706,23 @@ class PythonBackend(QObject):
 
     def __init__(self):
         super().__init__()
+        self.detector = YOLODetector()
         self.camera = None
         self.is_streaming = False
         self.current_frame = None
-        self.detector = YOLODetector()
-        self.frame_queue = Queue(maxsize=2)
-        self.detection_results = []
-        self.executor = ThreadPoolExecutor(max_threads=2)
+        self.detected_objects = []
+        self.frame_queue = Queue(maxsize=10)
+        self.executor = ThreadPoolExecutor(max_workers=4)
 
         # 性能监控
         self.fps_counter = 0
         self.fps_start_time = time.time()
         self.current_fps = 0
+
+        # 定时器用于推送数据
+        self.push_timer = QTimer()
+        self.push_timer.timeout.connect(self.push_data_to_frontend)
+        self.push_timer.start(100)  # 每100ms推送一次数据
 
         # 图像处理参数
         self.image_params = {
@@ -780,56 +730,109 @@ class PythonBackend(QObject):
             "brightness": 100,
             "saturation": 100,
             "blur": 0,
-            "delaySeconds": 1.0,
+            "delaySeconds": 1,
         }
 
-        # 定时器用于推送数据到前端
-        self.push_timer = QTimer()
-        self.push_timer.timeout.connect(self.push_data_to_frontend)
-        self.push_timer.start(100)  # 每100ms推送一次
+        # 保存的图像和报告
+        self.saved_images = []
+        self.detection_reports = []
+
+    def push_data_to_frontend(self):
+        """定时推送数据到前端"""
+        if hasattr(self, "web_page") and self.web_page:
+            # 构建推送数据
+            push_data = {
+                "type": "data_push",
+                "data": {
+                    "currentFrame": self.get_current_frame_base64(),
+                    "detectedObjects": self.detected_objects,
+                    "systemStatus": self.get_system_status(),
+                    "isStreaming": self.is_streaming,
+                },
+            }
+
+            # 推送到前端
+            js_code = f"window.handlePythonPush && window.handlePythonPush({json.dumps(push_data)});"
+            self.web_page.runJavaScript(js_code)
+
+    def get_current_frame_base64(self):
+        """获取当前帧的base64编码"""
+        if self.current_frame is not None:
+            try:
+                # 编码为JPEG
+                _, buffer = cv2.imencode(".jpg", self.current_frame)
+                # 转换为base64
+                import base64
+
+                frame_base64 = base64.b64encode(buffer).decode("utf-8")
+                return f"data:image/jpeg;base64,{frame_base64}"
+            except Exception as e:
+                print(f"编码帧失败: {e}")
+        return None
+
+    def get_system_status(self):
+        """获取系统状态"""
+        try:
+            cpu_percent = psutil.cpu_percent()
+            memory = psutil.virtual_memory()
+            return {
+                "fps": self.current_fps,
+                "cpu": cpu_percent,
+                "memory": memory.percent,
+                "isConnected": True,
+            }
+        except:
+            return {"fps": 0, "cpu": 0, "memory": 0, "isConnected": False}
 
     def apply_image_adjustments(self, frame):
-        """应用图像调整参数"""
-        if frame is None:
-            return None
+        """应用图像调整"""
+        try:
+            # 对比度和亮度调整
+            contrast = self.image_params["contrast"] / 100.0
+            brightness = self.image_params["brightness"] - 100
 
-        # 对比度和亮度调整
-        contrast = self.image_params["contrast"] / 100.0
-        brightness = self.image_params["brightness"] - 100
+            frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=brightness)
 
-        frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=brightness)
+            # 饱和度调整
+            saturation = self.image_params["saturation"] / 100.0
+            if saturation != 1.0:
+                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                hsv[:, :, 1] = hsv[:, :, 1] * saturation
+                frame = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
-        # 饱和度调整
-        saturation = self.image_params["saturation"] / 100.0
-        if saturation != 1.0:
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV).astype(np.float32)
-            hsv[:, :, 1] *= saturation
-            hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
-            frame = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+            # 模糊处理
+            blur_value = self.image_params["blur"]
+            if blur_value > 0:
+                kernel_size = int(blur_value * 2) + 1
+                frame = cv2.GaussianBlur(frame, (kernel_size, kernel_size), 0)
 
-        # 模糊处理
-        blur_value = self.image_params["blur"]
-        if blur_value > 0:
-            kernel_size = int(blur_value * 2) + 1
-            frame = cv2.GaussianBlur(frame, (kernel_size, kernel_size), 0)
-
-        return frame
+            return frame
+        except Exception as e:
+            print(f"图像调整失败: {e}")
+            return frame
 
     def camera_thread(self):
-        """摄像头线程函数"""
-        delay_seconds = self.image_params.get("delaySeconds", 1.0)
+        """摄像头线程"""
+        delay_seconds = self.image_params.get("delaySeconds", 1)
 
         while self.is_streaming and self.camera is not None:
-            ret, frame = self.camera.read()
-            if ret:
+            try:
+                ret, frame = self.camera.read()
+                if not ret:
+                    print("无法读取摄像头帧")
+                    break
+
                 # 应用图像调整
-                processed_frame = self.apply_image_adjustments(frame)
+                frame = self.apply_image_adjustments(frame)
 
-                # 将帧放入队列（非阻塞）
-                if not self.frame_queue.full():
-                    self.frame_queue.put(processed_frame)
+                # YOLO检测
+                detected_objects, annotated_frame = self.detector.detect_objects(frame)
 
-                # FPS计算
+                # 更新当前帧和检测结果
+                self.current_frame = annotated_frame
+                self.detected_objects = detected_objects
+
+                # 更新FPS
                 self.fps_counter += 1
                 current_time = time.time()
                 if current_time - self.fps_start_time >= 1.0:
@@ -837,92 +840,65 @@ class PythonBackend(QObject):
                     self.fps_counter = 0
                     self.fps_start_time = current_time
 
-                # 延迟控制
+                # 延迟
                 time.sleep(delay_seconds)
-            else:
-                print("无法读取摄像头帧")
+
+            except Exception as e:
+                print(f"摄像头线程错误: {e}")
                 break
 
-    def detection_thread(self):
-        """检测线程函数"""
-        while self.is_streaming:
-            try:
-                if not self.frame_queue.empty():
-                    frame = self.frame_queue.get()
-                    if frame is not None:
-                        # 执行检测
-                        detections, annotated_frame = self.detector.detect_objects(frame)
-                        self.detection_results = detections
-                        self.current_frame = annotated_frame
-                else:
-                    time.sleep(0.01)  # 短暂休眠避免CPU占用过高
-            except Exception as e:
-                print(f"检测线程错误: {e}")
-                time.sleep(0.1)
-
-    def push_data_to_frontend(self):
-        """推送数据到前端"""
-        if self.current_frame is not None:
-            # 将OpenCV图像转换为base64
-            _, buffer = cv2.imencode(".jpg", self.current_frame)
-            frame_base64 = buffer.tobytes().hex()
-
-            # 构建推送数据
-            push_data = {
-                "type": "frame_update",
-                "data": {
-                    "frame": frame_base64,
-                    "detections": self.detection_results,
-                    "fps": self.current_fps,
-                    "timestamp": time.time(),
-                },
-            }
-
-            # 推送到前端
-            self.push_to_frontend(json.dumps(push_data))
+        print("摄像头线程结束")
 
     @pyqtSlot(str, result=str)
-    def push_to_frontend(self, data):
-        """推送数据到前端（由QTimer调用）"""
-        # 这个方法会被前端的JavaScript轮询调用
-        return data
-
-    @pyqtSlot(result=str)
-    def get_system_status(self):
-        """获取系统状态"""
+    def handle_request(self, request_json: str) -> str:
+        """处理前端请求"""
         try:
-            cpu_percent = psutil.cpu_percent()
-            memory = psutil.virtual_memory()
-            memory_percent = memory.percent
+            request = json.loads(request_json)
+            action = request.get("action")
+            params = request.get("params", {})
 
-            status = {
-                "success": True,
-                "data": {
-                    "cpu_usage": cpu_percent,
-                    "memory_usage": memory_percent,
-                    "fps": self.current_fps,
-                    "is_streaming": self.is_streaming,
-                    "model_loaded": self.detector.interpreter is not None,
-                    "detection_count": len(self.detection_results),
-                },
-            }
-            return json.dumps(status)
+            print(f"收到请求: {action}")
+
+            if action == "start_camera":
+                return self.start_camera(params.get("camera_id", "0"))
+            elif action == "stop_camera":
+                return self.stop_camera()
+            elif action == "load_model":
+                return self.load_model(params.get("model_path"))
+            elif action == "update_image_params":
+                return self.update_image_params(params)
+            elif action == "update_recognition_settings":
+                return self.update_recognition_settings(params)
+            elif action == "save_image":
+                return self.save_image()
+            elif action == "export_report":
+                return self.export_report(params.get("format", "json"))
+            elif action == "get_system_status":
+                return json.dumps(
+                    {"success": True, "data": self.get_system_status()}
+                )
+            else:
+                return json.dumps({"success": False, "error": f"未知操作: {action}"})
+
         except Exception as e:
+            print(f"处理请求时出错: {e}")
             return json.dumps({"success": False, "error": str(e)})
 
-    @pyqtSlot(str, result=str)
-    def start_camera(self, camera_index):
+    def start_camera(self, camera_id: str) -> str:
         """启动摄像头"""
         try:
             if self.is_streaming:
                 self.stop_camera()
 
-            # 尝试打开摄像头
-            camera_idx = int(camera_index)
-            self.camera = cv2.VideoCapture(camera_idx)
+            # 尝试将camera_id转换为整数，如果失败则作为字符串处理
+            try:
+                cam_id = int(camera_id)
+            except ValueError:
+                cam_id = camera_id
 
+            self.camera = cv2.VideoCapture(cam_id)
             if not self.camera.isOpened():
-                return json.dumps({"success": False, "error": f"无法打开摄像头 {camera_idx}"})
+                return json.dumps({"success": False, "error": "无法打开摄像头"})
 
             # 设置摄像头参数
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
@@ -932,89 +908,75 @@ class PythonBackend(QObject):
             self.is_streaming = True
 
             # 启动摄像头线程
-            self.camera_thread_obj = threading.Thread(target=self.camera_thread)
-            self.camera_thread_obj.daemon = True
-            self.camera_thread_obj.start()
+            camera_thread = threading.Thread(target=self.camera_thread, daemon=True)
+            camera_thread.start()
 
-            # 启动检测线程
-            self.detection_thread_obj = threading.Thread(target=self.detection_thread)
-            self.detection_thread_obj.daemon = True
-            self.detection_thread_obj.start()
-
-            return json.dumps({"success": True, "message": f"摄像头 {camera_idx} 启动成功"})
+            return json.dumps({"success": True, "message": f"摄像头 {camera_id} 启动成功"})
 
         except Exception as e:
             return json.dumps({"success": False, "error": f"启动摄像头失败: {str(e)}"})
 
-    @pyqtSlot(result=str)
-    def stop_camera(self):
+    def stop_camera(self) -> str:
         """停止摄像头"""
         try:
             self.is_streaming = False
-
-            if self.camera is not None:
+            if self.camera:
                 self.camera.release()
                 self.camera = None
 
-            # 清空队列
-            while not self.frame_queue.empty():
-                self.frame_queue.get()
-
             self.current_frame = None
-            self.detection_results = []
+            self.detected_objects = []
 
             return json.dumps({"success": True, "message": "摄像头已停止"})
 
         except Exception as e:
             return json.dumps({"success": False, "error": f"停止摄像头失败: {str(e)}"})
 
-    @pyqtSlot(str, result=str)
-    def load_model(self, model_path):
+    def load_model(self, model_path: str) -> str:
         """加载模型"""
         try:
+            if not model_path:
+                return json.dumps({"success": False, "error": "模型路径不能为空"})
+
             success = self.detector.load_model(model_path)
             if success:
                 return json.dumps({"success": True, "message": f"模型加载成功: {model_path}"})
             else:
                 return json.dumps({"success": False, "error": "模型加载失败"})
+
         except Exception as e:
             return json.dumps({"success": False, "error": f"加载模型失败: {str(e)}"})
 
-    @pyqtSlot(str, result=str)
-    def update_image_params(self, params_json):
+    def update_image_params(self, params: Dict[str, Any]) -> str:
         """更新图像参数"""
         try:
-            params = json.loads(params_json)
             self.image_params.update(params)
-
-            # 更新检测器参数
+            # 同时更新检测器的参数
             self.detector.update_detection_params(params)
+            return json.dumps({"success": True, "message": "图像参数更新成功"})
 
-            return json.dumps({"success": True, "message": "图像参数已更新"})
         except Exception as e:
             return json.dumps({"success": False, "error": f"更新图像参数失败: {str(e)}"})
 
-    @pyqtSlot(str, result=str)
-    def update_recognition_settings(self, settings_json):
+    def update_recognition_settings(self, settings: Dict[str, Any]) -> str:
         """更新识别设置"""
         try:
-            settings = json.loads(settings_json)
             self.detector.update_recognition_settings(settings)
-            return json.dumps({"success": True, "message": "识别设置已更新"})
+            return json.dumps({"success": True, "message": "识别设置更新成功"})
+
         except Exception as e:
             return json.dumps(
                 {"success": False, "error": f"更新识别设置失败: {str(e)}"}
             )
 
-    @pyqtSlot(result=str)
-    def save_image(self):
+    def save_image(self) -> str:
         """保存当前图像"""
         try:
             if self.current_frame is None:
                 return json.dumps({"success": False, "error": "没有可保存的图像"})
 
             # 创建保存目录
-            save_dir = "./saved_images"
+            save_dir = "saved_images"
             os.makedirs(save_dir, exist_ok=True)
 
             # 生成文件名
@@ -1024,50 +986,46 @@ class PythonBackend(QObject):
 
             # 保存图像
             cv2.imwrite(filepath, self.current_frame)
+            self.saved_images.append(filepath)
 
             return json.dumps(
-                {"success": True, "message": f"图像已保存: {filepath}"}
+                {"success": True, "message": f"图像已保存: {filepath}", "path": filepath}
             )
 
         except Exception as e:
             return json.dumps({"success": False, "error": f"保存图像失败: {str(e)}"})
 
-    @pyqtSlot(str, result=str)
-    def export_report(self, format_type):
+    def export_report(self, format_type: str = "json") -> str:
         """导出检测报告"""
         try:
-            if not self.detection_results:
-                return json.dumps({"success": False, "error": "没有检测结果可导出"})
-
             # 创建报告目录
-            report_dir = "./reports"
+            report_dir = "reports"
             os.makedirs(report_dir, exist_ok=True)
+
+            # 生成报告数据
+            report_data = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "total_objects": len(self.detected_objects),
+                "objects": self.detected_objects,
+                "system_status": self.get_system_status(),
+            }
 
             # 生成文件名
             timestamp = time.strftime("%Y%m%d_%H%M%S")
-            filename = f"detection_report_{timestamp}.{format_type}"
+            filename = f"report_{timestamp}.{format_type}"
             filepath = os.path.join(report_dir, filename)
 
-            # 准备报告数据
-            report_data = {
-                "timestamp": timestamp,
-                "total_detections": len(self.detection_results),
-                "detections": self.detection_results,
-                "system_info": {
-                    "fps": self.current_fps,
-                    "model_path": self.detector.model_path,
-                },
-            }
-
-            # 根据格式保存
+            # 保存报告
             if format_type == "json":
                 with open(filepath, "w", encoding="utf-8") as f:
                     json.dump(report_data, f, ensure_ascii=False, indent=2)
             else:
                 return json.dumps({"success": False, "error": f"不支持的格式: {format_type}"})
 
+            self.detection_reports.append(filepath)
+
             return json.dumps(
-                {"success": True, "message": f"报告已导出: {filepath}"}
+                {"success": True, "message": f"报告已导出: {filepath}", "path": filepath}
             )
 
         except Exception as e:
@@ -1082,64 +1040,62 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("图像识别系统 - Python后端")
         self.setGeometry(100, 100, 1200, 800)
 
-        # 创建中央部件
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
+        # 创建Python后端
+        self.backend = PythonBackend()
 
-        # 创建WebEngine视图
+        # 创建Web视图
         self.web_view = QWebEngineView()
 
         # 使用自定义页面
         custom_page = CustomWebEnginePage()
         self.web_view.setPage(custom_page)
 
-        # 启用开发者工具
+        # 设置Web引擎设置
         settings = self.web_view.settings()
-        settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-        settings.setAttribute(QWebEngineSettings.ErrorPageEnabled, True)
-        settings.setAttribute(QWebEngineSettings.PluginsEnabled, True)
+        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
 
-        # 创建Python后端
-        self.backend = PythonBackend()
-
-        # 设置WebChannel
+        # 设置Web通道
         self.channel = QWebChannel()
-        self.channel.registerObject("backend", self.backend)
+        self.channel.registerObject("pythonBackend", self.backend)
         custom_page.setWebChannel(self.channel)
 
+        # 将页面引用传递给后端
+        self.backend.web_page = custom_page
+
+        # 设置中央部件
+        central_widget = QWidget()
+        layout = QVBoxLayout(central_widget)
         layout.addWidget(self.web_view)
+        self.setCentralWidget(central_widget)
 
         # 加载前端页面
         self.load_frontend()
 
     def load_frontend(self):
         """加载前端页面"""
-        # 这里需要根据实际情况修改URL
-        # 如果是开发环境，使用 http://localhost:3000
-        # 如果是生产环境，使用本地文件路径
-        frontend_url = "http://localhost:3000"  # Next.js开发服务器
-        self.web_view.load(QUrl(frontend_url))
-
-    def closeEvent(self, event):
-        """窗口关闭事件"""
-        # 停止摄像头
-        self.backend.stop_camera()
-        event.accept()
+        try:
+            # 尝试加载本地开发服务器
+            self.web_view.load(QUrl("http://localhost:3000"))
+            print("已加载本地开发服务器: http://localhost:3000")
+        except Exception as e:
+            print(f"加载前端页面失败: {e}")
 
 
 def main():
     """主函数"""
     app = QApplication(sys.argv)
 
-    # 设置应用程序信息
+    # 设置应用程序属性
     app.setApplicationName("图像识别系统")
     app.setApplicationVersion("1.0")
 
     # 创建主窗口
     window = MainWindow()
     window.show()
+
+    print("Python后端已启动")
+    print("等待前端连接...")
 
     # 运行应用程序
     sys.exit(app.exec_())

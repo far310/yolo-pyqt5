@@ -457,6 +457,30 @@ export function ImageParamsControl({
           )}
         </div>
 
+        {/* 背景图像设置 */}
+        <div className="space-y-2">
+          <SectionHeader
+            title="背景图像设置"
+            isCollapsed={collapsedSections.backgroundImage}
+            onToggle={() => onToggleSection("backgroundImage")}
+          />
+          {!collapsedSections.backgroundImage && (
+            <div className="space-y-4 pl-4">
+              <div className="space-y-2">
+                <Label>背景图像路径</Label>
+                <Input
+                  type="text"
+                  placeholder="例如: ./img/bg.jpg"
+                  value={imageParams.backgroundImagePath}
+                  onChange={(e) => updateParam("backgroundImagePath", e.target.value)}
+                  className="w-full"
+                />
+                <p className="text-xs text-gray-500">用于异物检测的背景参考图像路径，支持相对路径和绝对路径</p>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* 尺寸分类 */}
         <div className="space-y-2">
           <SectionHeader

@@ -53,6 +53,7 @@ export default function ImageRecognitionDashboard() {
     distortionCorrection: true,
     cameraIntrinsics: true,
     cameraParams: true,
+    backgroundImage: true,
     sizeClassification: true,
     realSize: true,
   })
@@ -91,6 +92,8 @@ export default function ImageRecognitionDashboard() {
     hamburgerSizeMax: 13,
     realWidthCm: 29,
     realHeightCm: 18.5,
+    // 背景图像路径
+    backgroundImagePath: "./img/bg.jpg",
   })
 
   // 识别设置
@@ -239,6 +242,8 @@ export default function ImageRecognitionDashboard() {
       hamburgerSizeMax: 13,
       realWidthCm: 29,
       realHeightCm: 18.5,
+      // 背景图像路径默认值
+      backgroundImagePath: "./img/bg.jpg",
     }
     handleImageParamsChange(defaultParams)
   }
