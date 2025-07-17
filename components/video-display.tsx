@@ -55,7 +55,7 @@ export const VideoDisplay = forwardRef<
               ref={imgRef}
               src={currentFrame || "/placeholder.svg"}
               alt="Camera feed"
-              className="absolute inset-0 w-full h-full object-fill"
+              className="absolute inset-0 w-full h-full object-cover"
               onError={(e) => {
                 console.error("Image load error:", e)
               }}

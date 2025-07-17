@@ -1,9 +1,5 @@
 from queue import Queue
-
-# import numpy as np
 import platform
-
-# import cv2
 from concurrent.futures import ThreadPoolExecutor
 
 # 使用 tflite_runtime 或 tensorflow 作为解释器
@@ -11,7 +7,6 @@ try:
     from tflite_runtime.interpreter import Interpreter, load_delegate
 except ImportError:
     import tensorflow as tf
-
     Interpreter, load_delegate = tf.lite.Interpreter, tf.lite.experimental.load_delegate
 
 # 使用委托文件
@@ -20,13 +15,12 @@ delegate = {
     "Darwin": "libedgetpu.1.dylib",
     "Windows": "edgetpu.dll",
 }[platform.system()]
+
 # 传递给外部委托的选项 (作为字典)
 ext_delegate_options = {
     "allowed_cache_mode": 1,  # 启用缓存模式
     "allowed_builtin_code": 1,  # 启用内置算子
     "cache_file_path": "/pwd",  # 设置缓存文件路径
-    # "device_num": 0,  # 选择设备编号
-    # "allowed_builtin_code": 0,  # 控制内置算子的使用
 }
 
 
@@ -40,13 +34,6 @@ def initTfLite(model="./tfLiteModel/yolov5s.tflite"):
     )
     interpreter.allocate_tensors()
     interpreter.invoke()
-    # input_details = interpreter.get_input_details()
-    # output_details = interpreter.get_output_details()
-    # print(input_details)
-    # print(output_details)
-    # # 获取量化参数（例如输入）
-    # input_scale, input_zero_point = input_details[0]["quantization"]
-    # output_scale, output_zero_point = output_details[0]["quantization"]
     print(f"Model {model} loaded successfully.")
     return interpreter
 
