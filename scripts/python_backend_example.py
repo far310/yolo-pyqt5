@@ -158,7 +158,7 @@ class YOLODetector:
         self.output_zero_point = 0
         self.input_shape = None
         self.model_input_size = None
-        self.image_size = (1080, 1920)
+        self.image_size = (1920, 1080)
         # YOLO类别 - 与附件一致
         self.classes = [
             "Hamburger",
@@ -222,6 +222,7 @@ class YOLODetector:
                 [0.0, 0.0, 1.0],
             ]
         )
+        
         self.dist_coeffs = np.array(
             [
                 [
@@ -257,7 +258,7 @@ class YOLODetector:
             # 畸变矫正
             "distortionEnabled": True,
             # 高度补偿
-            "heightCorrection": False,
+            "heightCorrection": True,
         }
 
         if model_path and os.path.exists(model_path):
@@ -469,15 +470,22 @@ class YOLODetector:
     def detect_objects(self, image):
         """主检测函数 - 与附件myFunc函数逻辑完全一致"""
         if self.interpreter is None:
-            return []
+            print(f"模型未加载！")
+            return [], image
 
         try:
             # 获取图片原始尺寸
             original_size = image.shape[:2]
-            if self.recognition_settings.get("distortionEnabled", True):
+            print(f"获取图片原始尺寸：{original_size}")
+            print(f"畸变矫正参数：{self.recognition_settings.get("distortionEnabled", True)}")
+            print(f"畸变矫正参数：{self.recognition_settings.get("perspectiveEnabled", True)}")
+            distortionEnabled = self.recognition_settings.get("distortionEnabled", True)
+            perspectiveEnabled = self.recognition_settings.get("perspectiveEnabled", True)
+            if distortionEnabled:
                 # 畸变矫正
+                print(f"畸变矫正")
                 image = undistort_image_fast(image, self.map1, self.map2)
-            if self.recognition_settings.get("perspectiveEnabled", True):
+            if perspectiveEnabled and distortionEnabled:
                 # 透视校正
                 image = perspective_transform(
                     image,
@@ -487,7 +495,7 @@ class YOLODetector:
                     self.output_height,
                 )
                 original_size = image.shape[:2]
-
+                print(f"透视校后")
             # 预处理 - 使用缓存的输入尺寸
             input_data = self.preprocess(image, self.model_input_size)
             input_data = input_data.transpose((0, 2, 3, 1))
@@ -504,7 +512,7 @@ class YOLODetector:
 
             # 获取输出
             output_data = self.interpreter.get_tensor(self.output_details[0]["index"])
-            print(f"获取输出{output_data}")
+            # print(f"获取输出{output_data}")
             # 反量化 - 使用缓存的量化参数
             if self.output_scale != 0:  # 量化模型
                 output_data = (
@@ -813,7 +821,7 @@ class ImageRecognitionAPI(QObject):
             perspective_enabled = params.get(
                 "perspectiveEnabled", self.image_params.get("perspectiveEnabled", True)
             )
-
+            print(f"distortion_enabled {distortion_enabled},perspectiveEnabled {perspective_enabled}")
             # 检查：如果畸变矫正没开启就不能开启透视变换
             if perspective_enabled and not distortion_enabled:
                 return json.dumps(
@@ -1281,11 +1289,13 @@ class ImageRecognitionAPI(QObject):
                 # 根据延迟设置执行目标检测
                 current_time = time.time()
                 if (current_time - self.last_detection_time) >= self.detection_delay:
-                    print(f"只有在摄像头启动时才运行2")
+                    # print(f"只有在摄像头启动时才运行2")
                     frame = self._apply_image_processing(frame)
+                    print(f"只有在摄像头启动时才运行3")
                     detections, processed_frame = self.yolo_detector.detect_objects(
                         frame
                     )
+                    print(f"只有在摄像头启动时才运行4")
                     self.detected_objects = detections
                     self.processed_frame = processed_frame
                     self.last_detection_time = current_time
