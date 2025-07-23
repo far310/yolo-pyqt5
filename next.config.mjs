@@ -22,8 +22,11 @@ const nextConfig = {
     unoptimized: true,
   },
   // 性能优化
-  swcMinify: true,
+  // swcMinify: true,
   // 输出配置 - 修改为静态导出
+  //basePath: './',
+  assetPrefix:'./',
+  //trailingSlash: true,
   output: 'export',
   eslint: {
     ignoreDuringBuilds: true,

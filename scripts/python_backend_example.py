@@ -1390,7 +1390,8 @@ class MainWindow(QMainWindow):
 
     def load_web_page(self):
         """加载网页"""
-        url = QUrl("http://localhost:3000")  # Next.js 开发服务器
+        # url = QUrl("http://localhost:3000")  # Next.js 开发服务器
+        url = QUrl("file:///./out/index.html")
         self.web_view.load(url)
 
         # 添加页面加载完成的回调
