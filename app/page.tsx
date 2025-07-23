@@ -70,17 +70,17 @@ export default function ImageRecognitionDashboard() {
     scoreThresh: 0,
     perspectiveEnabled: true,
     srcPoints: {
-      topLeft: { x: 650, y: 330 },
-      topRight: { x: 1425, y: 330 },
-      bottomRight: { x: 1830, y: 889 },
-      bottomLeft: { x: 230, y: 889 },
+      topLeft: { x: 510, y: 270 },
+      topRight: { x: 1170, y: 270 },
+      bottomRight: { x: 1500, y: 710 },
+      bottomLeft: { x: 140, y: 710 },
     },
     distortionEnabled: true,
-    distortionK1: -44.9,
-    distortionK2: 25.1,
-    distortionP1: 0.04,
-    distortionP2: 0.02,
-    distortionK3: -7.9,
+    distortionK1: -0.430483648,
+    distortionK2: 0.216393722,
+    distortionP1: -0.000156465611,
+    distortionP2: 0.000104551776,
+    distortionK3: -0.0564557922,
     // 相机内参 - 与Python后端一致
     focalLengthX: 1260.15281,
     focalLengthY: 1256.08744,
@@ -178,7 +178,10 @@ export default function ImageRecognitionDashboard() {
     async (params: ImageParams) => {
       setImageParams(params)
       try {
-        await updateImageParams(params)
+        const result = await updateImageParams(params)
+        if (!result.success) {
+          showError(result.error)
+        }
       } catch (error) {
         console.error("Failed to update image params:", error)
       }
@@ -228,17 +231,17 @@ export default function ImageRecognitionDashboard() {
       scoreThresh: 0,
       perspectiveEnabled: true,
       srcPoints: {
-        topLeft: { x: 650, y: 330 },
-        topRight: { x: 1425, y: 330 },
-        bottomRight: { x: 1830, y: 889 },
-        bottomLeft: { x: 230, y: 889 },
+        topLeft: { x: 510, y: 270 },
+        topRight: { x: 1170, y: 270 },
+        bottomRight: { x: 1500, y: 710 },
+        bottomLeft: { x: 140, y: 710 },
       },
       distortionEnabled: true,
-      distortionK1: -44.9,
-      distortionK2: 25.1,
-      distortionP1: 0.04,
-      distortionP2: 0.02,
-      distortionK3: -7.9,
+      distortionK1: -0.430483648,
+      distortionK2: 0.216393722,
+      distortionP1: -0.000156465611,
+      distortionP2: 0.000104551776,
+      distortionK3: -0.0564557922,
       // 相机内参默认值
       focalLengthX: 1260.15281,
       focalLengthY: 1256.08744,
