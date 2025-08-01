@@ -53,17 +53,15 @@ class PythonAPI {
           try {
             // 确保 QWebChannel 构造函数可用
             if (typeof window.QWebChannel === "undefined") {
-              // 如果 QWebChannel 不可用，尝试从全局加载
-              const script = document.createElement("script")
-              script.src = "qrc:///qtwebchannel/qwebchannel.js"
-              script.onload = () => {
-                this.createWebChannel(resolve, reject, timeout)
-              }
-              script.onerror = () => {
-                console.error("Failed to load QWebChannel script")
-                reject(new Error("Failed to load QWebChannel script"))
-              }
-              document.head.appendChild(script)
+              // 动态加载 QWebChannel 脚本
+              this.loadQWebChannelScript()
+                .then(() => {
+                  this.createWebChannel(resolve, reject, timeout)
+                })
+                .catch((error) => {
+                  console.error("Failed to load QWebChannel script:", error)
+                  reject(error)
+                })
             } else {
               this.createWebChannel(resolve, reject, timeout)
             }
@@ -78,6 +76,34 @@ class PythonAPI {
       }
 
       tryInit()
+    })
+  }
+
+  private loadQWebChannelScript(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // 首先尝试从本地加载
+      const localScript = document.createElement("script")
+      localScript.src = "/qwebchannel.js"
+      localScript.onload = () => {
+        console.log("QWebChannel loaded from local file")
+        resolve()
+      }
+      localScript.onerror = () => {
+        console.log("Local QWebChannel not found, trying Qt resource")
+        // 如果本地文件不存在，尝试从Qt资源加载
+        const qtScript = document.createElement("script")
+        qtScript.src = "qrc:///qtwebchannel/qwebchannel.js"
+        qtScript.onload = () => {
+          console.log("QWebChannel loaded from Qt resource")
+          resolve()
+        }
+        qtScript.onerror = () => {
+          console.error("Failed to load QWebChannel from any source")
+          reject(new Error("Failed to load QWebChannel script"))
+        }
+        document.head.appendChild(qtScript)
+      }
+      document.head.appendChild(localScript)
     })
   }
 

@@ -1,7 +1,7 @@
 # setup.py
 from cx_Freeze import setup, Executable
 
-build_exe_options = {"packages": ["os"], "include_files": ["model/", "img/", "/out"]}
+build_exe_options = {"packages": ["os"], "include_files": ["model/", "img/", "out"]}
 
 setup(
     name="Object Detection",

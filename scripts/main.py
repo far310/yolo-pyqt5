@@ -30,8 +30,12 @@ import psutil
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
 
+
 # PyQt5 imports
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
+from PyQt5.QtCore import Qt
+
+QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
 from PyQt5.QtCore import QObject, pyqtSlot, QUrl, QTimer
@@ -222,7 +226,7 @@ class YOLODetector:
                 [0.0, 0.0, 1.0],
             ]
         )
-        
+
         self.dist_coeffs = np.array(
             [
                 [
@@ -477,10 +481,12 @@ class YOLODetector:
             # 获取图片原始尺寸
             original_size = image.shape[:2]
             print(f"获取图片原始尺寸：{original_size}")
-            print(f"畸变矫正参数：{self.recognition_settings.get("distortionEnabled", True)}")
-            print(f"畸变矫正参数：{self.recognition_settings.get("perspectiveEnabled", True)}")
+            # print(f"畸变矫正参数：{self.recognition_settings.get("distortionEnabled", True)}")
+            # print(f"畸变矫正参数：{self.recognition_settings.get("perspectiveEnabled", True)}")
             distortionEnabled = self.recognition_settings.get("distortionEnabled", True)
-            perspectiveEnabled = self.recognition_settings.get("perspectiveEnabled", True)
+            perspectiveEnabled = self.recognition_settings.get(
+                "perspectiveEnabled", True
+            )
             if distortionEnabled:
                 # 畸变矫正
                 print(f"畸变矫正")
@@ -821,7 +827,9 @@ class ImageRecognitionAPI(QObject):
             perspective_enabled = params.get(
                 "perspectiveEnabled", self.image_params.get("perspectiveEnabled", True)
             )
-            print(f"distortion_enabled {distortion_enabled},perspectiveEnabled {perspective_enabled}")
+            print(
+                f"distortion_enabled {distortion_enabled},perspectiveEnabled {perspective_enabled}"
+            )
             # 检查：如果畸变矫正没开启就不能开启透视变换
             if perspective_enabled and not distortion_enabled:
                 return json.dumps(
@@ -1391,9 +1399,13 @@ class MainWindow(QMainWindow):
     def load_web_page(self):
         """加载网页"""
         # url = QUrl("http://localhost:3000")  # Next.js 开发服务器
-        url = QUrl("file:///./out/index.html")
-        self.web_view.load(url)
+        # linux
+        file_path = os.path.abspath("./out/index.html")
+        url = QUrl.fromLocalFile(file_path)
 
+        url = QUrl("file:///./out/index.html")
+
+        self.web_view.load(url)
         # 添加页面加载完成的回调
         self.web_view.loadFinished.connect(self.on_load_finished)
 
@@ -1435,6 +1447,7 @@ class MainWindow(QMainWindow):
 
 def main():
     """主函数"""
+
     app = QApplication(sys.argv)
 
     # 设置应用程序属性
